@@ -1,0 +1,7 @@
+-r base.txt
+
+# Production сервер
+gunicorn==21.2.0
+
+# Мониторинг
+sentry-sdk==1.40.0

@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head><meta charset="UTF-8"></head>
+<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+  <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
+    <h2 style="color: #1890ff;">ИС «АСУ» — Код подтверждения</h2>
+    <p>Здравствуйте, {{ user_full_name }}!</p>
+    <p>Ваш код подтверждения:</p>
+    <div style="background: #f0f5ff; border: 2px solid #1890ff; border-radius: 8px; padding: 20px; text-align: center; margin: 20px 0;">
+      <span style="font-size: 32px; font-weight: bold; letter-spacing: 8px; color: #1890ff;">{{ otp_code }}</span>
+    </div>
+    <p>Код действителен <strong>30 минут</strong>.</p>
+    <p style="color: #999; font-size: 12px;">Если вы не запрашивали этот код, проигнорируйте это сообщение.</p>
+    <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
+    <p style="color: #999; font-size: 12px;">АО «КФГД» — ИС «Автоматизированный складской учёт»</p>
+  </div>
+</body>
+</html>

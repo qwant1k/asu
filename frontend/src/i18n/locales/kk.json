@@ -1,0 +1,17 @@
+{
+  "common": {},
+  "auth": {},
+  "nav": {},
+  "dashboard": {},
+  "profile": {},
+  "references": {},
+  "requests": {},
+  "documents": {},
+  "otp": {},
+  "notifications": {},
+  "reports": {},
+  "inventory": {},
+  "admin": {},
+  "roles": {},
+  "assetTypes": {}
+}
