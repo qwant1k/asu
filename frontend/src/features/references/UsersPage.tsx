@@ -5,7 +5,7 @@ import api from '../../api/axios';
 import type { User, Department, PaginatedResponse, UserRole } from '../../shared/types';
 import {
   C, PageHeader, Btn, Th, Td, Badge as UBadge, Drawer, InputField, SelectField,
-  Spinner, EmptyState, hoverRow, Popconfirm, Modal,
+  Spinner, EmptyState, hoverRow, Popconfirm, Modal, Surface, FilterBar,
 } from '../../shared/ui/primitives';
 
 const PAGE_SIZE = 20;
@@ -142,22 +142,22 @@ const UsersPage: React.FC = () => {
     <div>
       <PageHeader title={t('nav.users')} right={<Btn onClick={openCreate}>+ {t('common.add')}</Btn>} />
 
-      <div style={{ display: 'flex', gap: 10, marginBottom: 16, flexWrap: 'wrap' }}>
+      <FilterBar>
         <input placeholder={t('common.search')} value={search}
           onChange={(e) => { setSearch(e.target.value); setPage(1); }}
-          style={{ padding: '8px 14px', border: `1px solid ${C.inputBorder}`, borderRadius: 6, fontSize: 13, width: 250, outline: 'none' }}
+          style={{ padding: '8px 14px', border: `1px solid ${C.inputBorder}`, borderRadius: C.radiusSm, fontSize: 13, width: 250, outline: 'none', background: C.glassStrong }}
         />
         <select value={filterDept} onChange={(e) => { setFilterDept(e.target.value); setPage(1); }}
-          style={{ padding: '8px 12px', border: `1px solid ${C.inputBorder}`, borderRadius: 6, fontSize: 13, color: C.secondary, background: '#fff' }}>
+          style={{ padding: '8px 12px', border: `1px solid ${C.inputBorder}`, borderRadius: C.radiusSm, fontSize: 13, color: C.secondary, background: C.glassStrong }}>
           {deptOpts.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
         </select>
         <select value={filterRole} onChange={(e) => { setFilterRole(e.target.value); setPage(1); }}
-          style={{ padding: '8px 12px', border: `1px solid ${C.inputBorder}`, borderRadius: 6, fontSize: 13, color: C.secondary, background: '#fff' }}>
+          style={{ padding: '8px 12px', border: `1px solid ${C.inputBorder}`, borderRadius: C.radiusSm, fontSize: 13, color: C.secondary, background: C.glassStrong }}>
           {roleOpts.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
         </select>
-      </div>
+      </FilterBar>
 
-      <div style={{ background: '#fff', border: `1px solid ${C.border}`, borderRadius: 10, overflow: 'hidden' }}>
+      <Surface>
         {loading ? <Spinner /> : data.length === 0 ? <EmptyState /> : (
           <div style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 900 }}>
@@ -205,15 +205,15 @@ const UsersPage: React.FC = () => {
             <div style={{ display: 'flex', gap: 4 }}>
               {Array.from({ length: Math.min(totalPages, 10) }, (_, i) => (
                 <button key={i} onClick={() => setPage(i + 1)} style={{
-                  padding: '4px 10px', borderRadius: 4, border: `1px solid ${C.inputBorder}`,
-                  background: page === i + 1 ? C.accent : '#fff', color: page === i + 1 ? '#fff' : C.text,
+                  padding: '4px 10px', borderRadius: C.radiusSm, border: `1px solid ${C.inputBorder}`,
+                  background: page === i + 1 ? `linear-gradient(135deg, ${C.accent}, #0EA5E9)` : C.glassStrong, color: page === i + 1 ? '#fff' : C.text,
                   cursor: 'pointer', fontSize: 12,
                 }}>{i + 1}</button>
               ))}
             </div>
           </div>
         )}
-      </div>
+      </Surface>
 
       <Drawer
         open={drawerOpen}
@@ -224,7 +224,7 @@ const UsersPage: React.FC = () => {
           <Btn onClick={handleSave} loading={saving}>{t('common.save')}</Btn>
         </>}
       >
-        {errorMsg && <div style={{ background: C.dangerBg, color: C.danger, padding: '8px 12px', borderRadius: 6, fontSize: 12, marginBottom: 14 }}>{errorMsg}</div>}
+        {errorMsg && <div style={{ background: C.dangerBg, color: C.danger, padding: '8px 12px', borderRadius: C.radiusSm, fontSize: 12, marginBottom: 14 }}>{errorMsg}</div>}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
           <InputField label={t('auth.username') + ' *'} value={fUsername} onChange={(e) => setFUsername(e.target.value)} disabled={!!editItem} />
           {!editItem && <InputField label={t('auth.password') + ' *'} type="password" value={fPassword} onChange={(e) => setFPassword(e.target.value)} />}
@@ -253,7 +253,7 @@ const UsersPage: React.FC = () => {
 
       <Modal open={!!tempPassword} onClose={() => setTempPassword('')} title={t('common.passwordReset')}>
         <p style={{ fontSize: 13, color: C.text, marginBottom: 8 }}>{t('common.tempPassword')}:</p>
-        <div style={{ background: C.accentLight, padding: '12px 16px', borderRadius: 6, fontWeight: 700, fontSize: 16, color: C.accent, letterSpacing: 1 }}>
+        <div style={{ background: C.accentLight, padding: '12px 16px', borderRadius: C.radiusSm, fontWeight: 700, fontSize: 16, color: C.accent, letterSpacing: 1 }}>
           {tempPassword}
         </div>
       </Modal>

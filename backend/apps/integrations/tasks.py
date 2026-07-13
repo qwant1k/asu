@@ -61,23 +61,18 @@ def sync_assets_from_1c_task(asset_type: str = 'all'):
 @shared_task(name='check_document_signing_reminders')
 def check_document_signing_reminders_task():
     """
-    Проверка документов на подписании > 72 рабочих часов.
+    Проверка документов, ожидающих подписи.
     Запускается каждые 4 часа.
     """
     from apps.documents.models import DocumentSignature
     from apps.notifications.services import NotificationService
     from apps.common.constants import NOTIFICATION_OVERDUE_TASK
-    from datetime import timedelta
-
-    threshold = timezone.now() - timedelta(hours=72)
-
-    overdue_signatures = DocumentSignature.objects.filter(
+    pending_signatures = DocumentSignature.objects.filter(
         signed_at__isnull=True,
         sent_for_revision_at__isnull=True,
-        otp_expires_at__lt=threshold,
     ).select_related('signer')
 
-    for sig in overdue_signatures:
+    for sig in pending_signatures:
         NotificationService.send(
             recipient=sig.signer,
             notification_type=NOTIFICATION_OVERDUE_TASK,
@@ -87,7 +82,7 @@ def check_document_signing_reminders_task():
             related_object=sig.document,
         )
 
-    logger.info(f'Напоминания о подписании: отправлено {overdue_signatures.count()}')
+    logger.info(f'Напоминания о подписании: отправлено {pending_signatures.count()}')
 
 
 @shared_task(name='check_asset_expiry')
@@ -145,50 +140,3 @@ def check_asset_expiry_task():
                 notified += 1
 
     logger.info(f'Проверка сроков активов: отправлено уведомлений {notified}')
-
-
-@shared_task(name='send_otp_email')
-def send_otp_email_task(user_id: int, otp_code: str, purpose: str = 'approval'):
-    """
-    Отправка OTP-кода на email пользователя.
-
-    Args:
-        user_id: ID пользователя
-        otp_code: OTP-код (незахэшированный)
-        purpose: назначение (approval / signing)
-    """
-    from apps.users.models import User
-    from apps.notifications.services import NotificationService
-    from apps.common.constants import NOTIFICATION_DOCUMENT_TO_SIGN
-    from django.core.mail import send_mail
-    from django.conf import settings
-
-    try:
-        user = User.objects.get(pk=user_id)
-    except User.DoesNotExist:
-        logger.error(f'Пользователь {user_id} не найден')
-        return
-
-    if not user.email:
-        logger.warning(f'У пользователя {user.get_short_name()} не указан email')
-        return
-
-    subject = f'[{settings.APP_NAME}] Код подтверждения OTP'
-    body = (
-        f'Здравствуйте, {user.get_full_name()}!\n\n'
-        f'Ваш код подтверждения: {otp_code}\n'
-        f'Код действителен 30 минут.\n\n'
-        f'Если вы не запрашивали код, проигнорируйте это сообщение.'
-    )
-
-    try:
-        send_mail(
-            subject=subject,
-            message=body,
-            from_email=settings.DEFAULT_FROM_EMAIL,
-            recipient_list=[user.email],
-            fail_silently=False,
-        )
-        logger.info(f'OTP-код отправлен на {user.email}')
-    except Exception as e:
-        logger.error(f'Ошибка отправки OTP на {user.email}: {e}')

@@ -149,3 +149,60 @@ class Asset(TimestampMixin):
 
     def __str__(self):
         return f'{self.name} ({self.code})'
+
+
+class UnitOfMeasure(TimestampMixin):
+    """Unit of measure reference."""
+
+    name = models.CharField(_('Наименование'), max_length=255, unique=True)
+    code = models.CharField(_('Код'), max_length=50, unique=True, blank=True)
+    is_active = models.BooleanField(_('Активен'), default=True)
+
+    class Meta:
+        verbose_name = _('Единица измерения')
+        verbose_name_plural = _('Единицы измерения')
+        ordering = ['name']
+
+    def __str__(self):
+        return self.name
+
+
+class Warehouse(TimestampMixin):
+    """Warehouse / storage location for assets and transfers."""
+
+    name = models.CharField(_('Наименование'), max_length=255)
+    code = models.CharField(_('Код'), max_length=50, unique=True, blank=True)
+    department = models.ForeignKey(
+        'users.Department',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='warehouses',
+        verbose_name=_('Подразделение'),
+    )
+    address = models.CharField(_('Адрес'), max_length=255, blank=True, default='')
+    is_active = models.BooleanField(_('Активен'), default=True)
+
+    class Meta:
+        verbose_name = _('Склад')
+        verbose_name_plural = _('Склады')
+        ordering = ['name']
+
+    def __str__(self):
+        return self.name
+
+
+class Position(TimestampMixin):
+    """Position / job title reference."""
+
+    name = models.CharField(_('Наименование'), max_length=255, unique=True)
+    code = models.CharField(_('Код'), max_length=50, unique=True, blank=True)
+    is_active = models.BooleanField(_('Активна'), default=True)
+
+    class Meta:
+        verbose_name = _('Должность')
+        verbose_name_plural = _('Должности')
+        ordering = ['name']
+
+    def __str__(self):
+        return self.name

@@ -4,7 +4,7 @@ import api from '../../api/axios';
 import type { Counterparty, PaginatedResponse } from '../../shared/types';
 import {
   C, PageHeader, Btn, Th, Td, Badge, Modal, InputField, TextAreaField,
-  Spinner, EmptyState, hoverRow, Popconfirm,
+  Spinner, EmptyState, hoverRow, Popconfirm, Surface, FilterBar,
 } from '../../shared/ui/primitives';
 
 const PAGE_SIZE = 20;
@@ -101,19 +101,19 @@ const CounterpartiesPage: React.FC = () => {
         right={<Btn onClick={openCreate}>+ {t('common.add')}</Btn>}
       />
 
-      <div style={{ marginBottom: 16 }}>
+      <FilterBar>
         <input
           placeholder={t('common.search')}
           value={search}
           onChange={(e) => { setSearch(e.target.value); setPage(1); }}
           style={{
             padding: '8px 14px', border: `1px solid ${C.inputBorder}`,
-            borderRadius: 6, fontSize: 13, width: 300, outline: 'none',
+            borderRadius: C.radiusSm, fontSize: 13, width: 300, outline: 'none', background: C.glassStrong,
           }}
         />
-      </div>
+      </FilterBar>
 
-      <div style={{ background: '#fff', border: `1px solid ${C.border}`, borderRadius: 10, overflow: 'hidden' }}>
+      <Surface>
         {loading ? <Spinner /> : data.length === 0 ? <EmptyState /> : (
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>
@@ -155,15 +155,15 @@ const CounterpartiesPage: React.FC = () => {
             <div style={{ display: 'flex', gap: 4 }}>
               {Array.from({ length: totalPages }, (_, i) => (
                 <button key={i} onClick={() => setPage(i + 1)} style={{
-                  padding: '4px 10px', borderRadius: 4, border: `1px solid ${C.inputBorder}`,
-                  background: page === i + 1 ? C.accent : '#fff', color: page === i + 1 ? '#fff' : C.text,
+                  padding: '4px 10px', borderRadius: C.radiusSm, border: `1px solid ${C.inputBorder}`,
+                  background: page === i + 1 ? `linear-gradient(135deg, ${C.accent}, #0EA5E9)` : C.glassStrong, color: page === i + 1 ? '#fff' : C.text,
                   cursor: 'pointer', fontSize: 12,
                 }}>{i + 1}</button>
               ))}
             </div>
           </div>
         )}
-      </div>
+      </Surface>
 
       <Modal
         open={modalOpen}
@@ -174,7 +174,7 @@ const CounterpartiesPage: React.FC = () => {
           <Btn onClick={handleSave} loading={saving}>{t('common.save')}</Btn>
         </>}
       >
-        {errorMsg && <div style={{ background: C.dangerBg, color: C.danger, padding: '8px 12px', borderRadius: 6, fontSize: 12, marginBottom: 14 }}>{errorMsg}</div>}
+        {errorMsg && <div style={{ background: C.dangerBg, color: C.danger, padding: '8px 12px', borderRadius: C.radiusSm, fontSize: 12, marginBottom: 14 }}>{errorMsg}</div>}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
           <InputField label={t('common.name') + ' *'} value={fName} onChange={(e) => setFName(e.target.value)} />
           <InputField label={t('references.bin') + ' *'} value={fBin} onChange={(e) => setFBin(e.target.value)} maxLength={12} />

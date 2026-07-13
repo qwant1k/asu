@@ -1,8 +1,11 @@
 import React, { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import api from '../../api/axios';
-import type { WarehouseStock, PaginatedResponse } from '../../shared/types';
-import { C, PageHeader, Th, Td, Badge, Spinner, EmptyState, hoverRow } from '../../shared/ui/primitives';
+import { useAppSelector } from '../../app/hooks';
+import type { AssetCategory, WarehouseStock, PaginatedResponse } from '../../shared/types';
+import { C, PageHeader, Th, Td, Badge, Spinner, EmptyState, Btn, hoverRow, Surface } from '../../shared/ui/primitives';
+import AssetLink from '../../shared/components/AssetLink';
 
 const ASSET_TYPE_OPTIONS = [
   { value: '', label: 'Все' },
@@ -13,12 +16,19 @@ const ASSET_TYPE_OPTIONS = [
 
 const WarehouseStockPage: React.FC = () => {
   const { t } = useTranslation();
+  const navigate = useNavigate();
+  const { user } = useAppSelector((state) => state.auth);
+  const canUpload = ['ADMIN', 'MOL_WAREHOUSE', 'MOL_NMA'].includes(user?.role || '')
+    || (user?.effective_permissions || []).includes('warehouse.upload');
   const [data, setData] = useState<WarehouseStock[]>([]);
   const [loading, setLoading] = useState(false);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
   const [assetType, setAssetType] = useState('');
+  const [categoryFilter, setCategoryFilter] = useState('');
+  const [groupFilter, setGroupFilter] = useState('');
+  const [categories, setCategories] = useState<AssetCategory[]>([]);
 
   useEffect(() => {
     (async () => {
@@ -27,41 +37,75 @@ const WarehouseStockPage: React.FC = () => {
         const params: any = { page, page_size: 20 };
         if (search) params.search = search;
         if (assetType) params.asset_type = assetType;
+        if (categoryFilter) params.category = categoryFilter;
+        if (groupFilter) params.group = groupFilter;
         const res = await api.get<PaginatedResponse<WarehouseStock>>('/assets/warehouse-stock/', { params });
         setData(res.data.results); setTotal(res.data.count);
       } catch { setData([]); } finally { setLoading(false); }
     })();
-  }, [page, search, assetType]);
+  }, [page, search, assetType, categoryFilter, groupFilter]);
 
-  const inputStyle: React.CSSProperties = { padding: '8px 14px', border: `1px solid ${C.inputBorder}`, borderRadius: 6, fontSize: 13, outline: 'none' };
+  useEffect(() => {
+    (async () => {
+      try {
+        const params: Record<string, any> = { page_size: 500, ordering: 'name' };
+        if (assetType) params.asset_type = assetType;
+        const res = await api.get<PaginatedResponse<AssetCategory>>('/references/asset-categories/', { params });
+        setCategories(res.data.results || []);
+      } catch { setCategories([]); }
+    })();
+  }, [assetType]);
+
+  const inputStyle: React.CSSProperties = {
+    padding: '8px 14px',
+    border: `1px solid ${C.inputBorder}`,
+    borderRadius: C.radiusSm,
+    fontSize: 13,
+    outline: 'none',
+    minHeight: 38,
+    background: C.glassStrong,
+  };
 
   return (
     <div>
       <PageHeader title={t('nav.stock')} right={
-        <div style={{ display: 'flex', gap: 10 }}>
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
           <input placeholder={t('common.search')} value={search} onChange={(e) => { setSearch(e.target.value); setPage(1); }} style={{ ...inputStyle, width: 240 }} />
-          <select value={assetType} onChange={(e) => { setAssetType(e.target.value); setPage(1); }} style={{ ...inputStyle, width: 130 }}>
+          <select value={assetType} onChange={(e) => { setAssetType(e.target.value); setCategoryFilter(''); setGroupFilter(''); setPage(1); }} style={{ ...inputStyle, width: 130 }}>
             {ASSET_TYPE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
           </select>
+          <select value={categoryFilter} onChange={(e) => { setCategoryFilter(e.target.value); setPage(1); }} style={{ ...inputStyle, width: 170 }}>
+            <option value="">Все категории</option>
+            {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+          <select value={groupFilter} onChange={(e) => { setGroupFilter(e.target.value); setPage(1); }} style={{ ...inputStyle, width: 170 }}>
+            <option value="">Все группы</option>
+            {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+          {canUpload && (
+            <Btn variant="secondary" onClick={() => navigate('/warehouse/stock/upload')}>
+              {t('common.importExcel')}
+            </Btn>
+          )}
         </div>
       } />
       {loading ? <Spinner /> : (
-        <div style={{ background: '#fff', border: `1px solid ${C.border}`, borderRadius: 10, overflow: 'hidden' }}>
+        <Surface>
           <div style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 900 }}>
               <thead><tr>
                 <Th>{t('common.code')}</Th><Th>{t('common.name')}</Th><Th>{t('common.type')}</Th>
-                <Th>{t('references.unitOfMeasure')}</Th><Th right>{t('references.unitPrice')}</Th>
+                <Th>{t('references.unitOfMeasure')}</Th><Th>Группа</Th><Th right>{t('references.unitPrice')}</Th>
                 <Th right>{t('references.quantity')}</Th><Th right>{t('references.totalAmount')}</Th>
                 <Th>{t('references.location')}</Th>
               </tr></thead>
               <tbody>
-                {data.length === 0 ? <tr><td colSpan={8}><EmptyState text={t('common.noData')} /></td></tr> :
+                {data.length === 0 ? <tr><td colSpan={9}><EmptyState text={t('common.noData')} /></td></tr> :
                   data.map((r) => (
                     <tr key={r.id} onMouseEnter={(e) => hoverRow(e, true)} onMouseLeave={(e) => hoverRow(e, false)}>
-                      <Td muted>{r.asset_code}</Td><Td>{r.asset_name}</Td>
+                      <Td muted>{r.asset_code}</Td><Td><AssetLink assetId={r.asset}>{r.asset_name}</AssetLink></Td>
                       <Td><Badge status={r.asset_type_display} /></Td>
-                      <Td muted>{r.unit_of_measure}</Td><Td right>{r.unit_price}</Td>
+                      <Td muted>{r.unit_of_measure}</Td><Td muted>{r.group_name || '—'}</Td><Td right>{r.unit_price}</Td>
                       <Td right>{r.quantity}</Td><Td right>{r.total_amount}</Td>
                       <Td muted>{r.location}</Td>
                     </tr>
@@ -75,7 +119,7 @@ const WarehouseStockPage: React.FC = () => {
             {page > 1 && <button onClick={() => setPage(page - 1)} style={{ marginLeft: 8, background: 'none', border: 'none', color: C.accent, cursor: 'pointer' }}>← Назад</button>}
             {total > page * 20 && <button onClick={() => setPage(page + 1)} style={{ marginLeft: 8, background: 'none', border: 'none', color: C.accent, cursor: 'pointer' }}>Далее →</button>}
           </div>
-        </div>
+        </Surface>
       )}
     </div>
   );

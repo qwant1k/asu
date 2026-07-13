@@ -1,16 +1,25 @@
 ﻿import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
+import {
+  CheckOutlined,
+  CloseOutlined,
+  EditOutlined,
+  LeftOutlined,
+  RollbackOutlined,
+  SendOutlined,
+  StopOutlined,
+} from '@ant-design/icons';
 import { useAppSelector } from '../../app/hooks';
 import api from '../../api/axios';
-import OTPSignModal from '../../shared/components/OTPSignModal';
-import type { Asset, AssetRequest, AssetRequestItem, PaginatedResponse, UserRole } from '../../shared/types';
+import AssetLink from '../../shared/components/AssetLink';
+import type { Asset, AssetRequest, PaginatedResponse, User } from '../../shared/types';
 import {
-  C, PageHeader, Btn, Panel, Badge, Th, Td, Spinner, EmptyState, hoverRow,
+  C, PageHeader, Btn, Panel, Badge, Th, Td, Spinner, EmptyState, Popconfirm, Modal, hoverRow,
 } from '../../shared/ui/primitives';
 
 interface IssueDraftRow { id: number; issued_asset: number | null; quantity_issued: number; }
-const ISSUE_ROLES: UserRole[] = ['ADMIN', 'AHS_WORKER', 'AHS_HEAD', 'MOL_WAREHOUSE', 'MOL_NMA'];
+type ApprovalAction = 'approve' | 'reject' | 'revision';
 
 const DescRow = ({ label, children }: { label: string; children: React.ReactNode }) => (
   <div style={{ display: 'flex', gap: 12, padding: '8px 0', borderBottom: `1px solid ${C.rowBorder}` }}>
@@ -27,14 +36,20 @@ const RequestDetailPage: React.FC = () => {
 
   const [request, setRequest] = useState<AssetRequest | null>(null);
   const [loading, setLoading] = useState(true);
-  const [otpModalOpen, setOtpModalOpen] = useState(false);
-  const [otpAction, setOtpAction] = useState<'approve' | 'reject'>('approve');
+  const [approvalAction, setApprovalAction] = useState<ApprovalAction | null>(null);
+  const [simpleAction, setSimpleAction] = useState<'withdraw' | 'cancel' | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
-  const [otpError, setOtpError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [actionComment, setActionComment] = useState('');
   const [groupedAssets, setGroupedAssets] = useState<Asset[]>([]);
   const [issueRows, setIssueRows] = useState<Record<number, IssueDraftRow>>({});
+  const [issueResponsibleCandidates, setIssueResponsibleCandidates] = useState<User[]>([]);
+  const [selectedIssueResponsibles, setSelectedIssueResponsibles] = useState<number[]>([]);
 
-  const canIssue = !!user?.role && ISSUE_ROLES.includes(user.role) && request?.status === 'APPROVED';
+  const canIssue = !!request?.pending_my_issue;
+  const userPermissions = user?.effective_permissions || [];
+  const isAhsIssueApprovalStep = request?.required_approver_role === 'AHS_HEAD'
+    && (user?.role === 'AHS_HEAD' || user?.role === 'ADMIN' || userPermissions.includes('requests.approve_ahs'));
 
   const fetchRequest = useCallback(async () => {
     try {
@@ -48,12 +63,31 @@ const RequestDetailPage: React.FC = () => {
     } catch { /* */ } finally { setLoading(false); }
   }, [id]);
 
-  const fetchGroupedAssets = useCallback(async () => {
-    try { const res = await api.get<PaginatedResponse<Asset>>('/references/assets/', { params: { page_size: 1000, grouped: true } }); setGroupedAssets(res.data.results || []); } catch { setGroupedAssets([]); }
+  const fetchGroupedAssets = useCallback(async (assetType?: string) => {
+    const baseAssetType = assetType === 'REPRESENTATIVE_TMZ' ? 'TMZ' : assetType;
+    try {
+      const res = await api.get<PaginatedResponse<Asset>>('/references/assets/', {
+        params: { page_size: 1000, grouped: true, asset_type: baseAssetType },
+      });
+      setGroupedAssets(res.data.results || []);
+    } catch { setGroupedAssets([]); }
   }, []);
 
   useEffect(() => { fetchRequest(); }, [fetchRequest]);
-  useEffect(() => { if (request?.status === 'APPROVED') fetchGroupedAssets(); }, [fetchGroupedAssets, request?.status]);
+  useEffect(() => { if (request?.status === 'APPROVED') fetchGroupedAssets(request.request_type_asset_type); }, [fetchGroupedAssets, request]);
+  useEffect(() => {
+    if (!request?.pending_my_approval || !isAhsIssueApprovalStep) {
+      setIssueResponsibleCandidates([]);
+      setSelectedIssueResponsibles([]);
+      return;
+    }
+    (async () => {
+      try {
+        const res = await api.get<User[]>('/requests/issue-responsible-candidates/');
+        setIssueResponsibleCandidates(res.data || []);
+      } catch { setIssueResponsibleCandidates([]); }
+    })();
+  }, [request?.pending_my_approval, isAhsIssueApprovalStep]);
 
   const groupedAssetsMap = useMemo(() => {
     const map: Record<number, Asset[]> = {};
@@ -62,18 +96,70 @@ const RequestDetailPage: React.FC = () => {
   }, [groupedAssets]);
 
   const handleSubmit = async () => {
+    setActionError(null);
     setActionLoading(true);
-    try { await api.post(`/requests/${id}/submit/`); fetchRequest(); } catch { /* */ } finally { setActionLoading(false); }
+    try {
+      await api.post(`/requests/${id}/submit/`);
+      fetchRequest();
+    } catch (err: any) {
+      setActionError(err?.response?.data?.detail || t('common.error'));
+    } finally { setActionLoading(false); }
   };
 
-  const handleRequestOtp = async () => { setOtpError(null); await api.post(`/requests/${id}/generate-otp/`); };
+  const openApprovalAction = (action: ApprovalAction) => {
+    setActionError(null);
+    setActionComment('');
+    setApprovalAction(action);
+    if (action === 'approve' && isAhsIssueApprovalStep) {
+      const existing = request?.issue_responsibles || [];
+      setSelectedIssueResponsibles(existing);
+    } else {
+      setSelectedIssueResponsibles([]);
+    }
+  };
 
-  const handleSign = async (otpCode: string) => {
-    setOtpError(null);
+  const handleApprovalAction = async (action: ApprovalAction) => {
+    if (action === 'revision' && !actionComment.trim()) {
+      setActionError('Укажите комментарий для корректировки');
+      return;
+    }
+    if (action === 'approve' && isAhsIssueApprovalStep && selectedIssueResponsibles.length === 0) {
+      setActionError('Выберите ответственного за выдачу');
+      return;
+    }
+    setActionError(null);
+    setActionLoading(true);
     try {
-      await api.post(`/requests/${id}/${otpAction === 'approve' ? 'approve' : 'reject'}/`, { otp_code: otpCode });
-      setOtpModalOpen(false); fetchRequest();
-    } catch (err: any) { setOtpError(err?.response?.data?.detail || t('common.error')); }
+      const endpoint = action === 'revision' ? 'send-to-revision' : action;
+      const payload = action === 'approve' && isAhsIssueApprovalStep
+        ? { issue_responsibles: selectedIssueResponsibles }
+        : action === 'approve'
+          ? {}
+          : { comment: actionComment };
+      await api.post(`/requests/${id}/${endpoint}/`, payload);
+      setApprovalAction(null);
+      setActionComment('');
+      fetchRequest();
+    } catch (err: any) {
+      setActionError(err?.response?.data?.detail || t('common.error'));
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleSimpleAction = async () => {
+    if (!simpleAction) return;
+    setActionError(null);
+    setActionLoading(true);
+    try {
+      await api.post(`/requests/${id}/${simpleAction}/`);
+      setSimpleAction(null);
+      fetchRequest();
+    } catch (err: any) {
+      setActionError(err?.response?.data?.detail || t('common.error'));
+    } finally {
+      setActionLoading(false);
+    }
   };
 
   const handleIssueRowChange = (itemId: number, field: keyof IssueDraftRow, value: number | null) => {
@@ -82,13 +168,16 @@ const RequestDetailPage: React.FC = () => {
 
   const handleIssueItems = async () => {
     if (!request) return;
+    setActionError(null);
     setActionLoading(true);
     try {
       await api.post(`/requests/${id}/issue-items/`, {
         items: request.items.map((item) => ({ id: item.id, issued_asset: issueRows[item.id]?.issued_asset, quantity_issued: issueRows[item.id]?.quantity_issued })),
       });
       fetchRequest();
-    } catch { /* */ } finally { setActionLoading(false); }
+    } catch (err: any) {
+      setActionError(err?.response?.data?.detail || t('common.error'));
+    } finally { setActionLoading(false); }
   };
 
   if (loading) return <Spinner />;
@@ -96,10 +185,41 @@ const RequestDetailPage: React.FC = () => {
 
   const isInitiator = user?.id === request.initiator;
   const isDraft = request.status === 'DRAFT';
-  const canSubmit = isInitiator && isDraft;
-  const canApprove = ['PENDING_SUPERVISOR', 'APPROVED_SUPERVISOR', 'APPROVED_MOL'].includes(request.status);
+  const isRevision = request.status === 'SENT_FOR_REVISION';
+  const canSubmit = isInitiator && (isDraft || isRevision);
+  const canEdit = isInitiator && (isDraft || isRevision);
+  const canWithdraw = isInitiator && request.status === 'PENDING_SUPERVISOR';
+  const canCancel = isInitiator && isDraft;
+  const canApprove = request.pending_my_approval;
+  const workflowSteps = [
+    { label: 'Создана', done: true, active: isDraft || isRevision },
+    {
+      label: isRevision ? 'На корректировке' : 'Отправлена на согласование',
+      done: !['DRAFT', 'SENT_FOR_REVISION'].includes(request.status),
+      active: ['SENT_FOR_REVISION', 'PENDING_SUPERVISOR', 'APPROVED_SUPERVISOR'].includes(request.status),
+    },
+    {
+      label: request.status === 'APPROVED' ? 'На выдаче' : 'Согласована',
+      done: ['APPROVED', 'EXECUTED'].includes(request.status),
+      active: request.status === 'APPROVED',
+    },
+    {
+      label: 'Выдана',
+      done: request.status === 'EXECUTED',
+      active: request.status === 'EXECUTED',
+    },
+  ];
 
-  const inputStyle: React.CSSProperties = { padding: '7px 12px', border: `1px solid ${C.inputBorder}`, borderRadius: 6, fontSize: 13, width: '100%', outline: 'none' };
+  const inputStyle: React.CSSProperties = {
+    padding: '8px 12px',
+    border: `1px solid ${C.inputBorder}`,
+    borderRadius: C.radiusSm,
+    fontSize: 13,
+    width: '100%',
+    outline: 'none',
+    minHeight: 38,
+    background: C.glassStrong,
+  };
 
   return (
     <div>
@@ -108,16 +228,36 @@ const RequestDetailPage: React.FC = () => {
         right={
           <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
             <Badge status={request.status} />
-            <Btn variant="secondary" onClick={() => navigate('/requests')}>← {t('common.back')}</Btn>
+            <Btn variant="secondary" onClick={() => navigate('/requests')}><LeftOutlined /> {t('common.back')}</Btn>
           </div>
         }
       />
+
+      <Panel title="Процесс заявки" style={{ marginBottom: 16 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: 10 }}>
+          {workflowSteps.map((step, idx) => (
+            <div key={step.label} style={{
+              border: `1px solid ${step.active ? C.accent : step.done ? C.successBg : C.border}`,
+              background: step.active ? C.accentLight : step.done ? C.successBg : C.surfaceSoft,
+              borderRadius: C.radiusSm,
+              padding: '12px 14px',
+              minHeight: 62,
+            }}>
+              <div style={{ fontSize: 11, color: C.secondary, marginBottom: 4 }}>Этап {idx + 1}</div>
+              <div style={{ fontSize: 13, fontWeight: 700, color: step.active ? C.accent : step.done ? C.success : C.text }}>{step.label}</div>
+            </div>
+          ))}
+        </div>
+      </Panel>
 
       <Panel title={t('requests.requestType')} style={{ marginBottom: 16 }}>
         <DescRow label={t('requests.requestType')}>{request.request_type_name}</DescRow>
         <DescRow label={t('requests.initiator')}>{request.initiator_name}</DescRow>
         <DescRow label={t('common.date')}>{new Date(request.created_at).toLocaleString('ru-KZ')}</DescRow>
         <DescRow label={t('common.status')}><Badge status={request.status} /></DescRow>
+        {request.issue_responsible_names?.length > 0 && (
+          <DescRow label="Ответственные за выдачу">{request.issue_responsible_names.join(', ')}</DescRow>
+        )}
         {request.reason && <DescRow label={t('requests.reason')}>{request.reason}</DescRow>}
       </Panel>
 
@@ -139,7 +279,7 @@ const RequestDetailPage: React.FC = () => {
               {(request.items || []).map((item) => (
                 <tr key={item.id} onMouseEnter={(e) => hoverRow(e, true)} onMouseLeave={(e) => hoverRow(e, false)}>
                   <Td bold>{item.requested_group_name || '—'}</Td>
-                  <Td>{item.asset_name}</Td>
+                  <Td><AssetLink assetId={item.issued_asset || item.asset}>{item.asset_name || '—'}</AssetLink></Td>
                   <Td muted>{item.asset_code}</Td>
                   <Td muted>{item.unit_of_measure}</Td>
                   <Td right>{item.quantity_requested}</Td>
@@ -154,7 +294,7 @@ const RequestDetailPage: React.FC = () => {
 
       {canIssue && (
         <Panel title="Точная выдача по заявке" noPad style={{ marginBottom: 16 }}>
-          <div style={{ background: C.accentLight, color: C.accent, padding: '10px 14px', borderRadius: 6, fontSize: 13, margin: '16px 16px 16px 16px' }}>
+          <div style={{ background: C.accentLight, color: C.accent, padding: '10px 14px', borderRadius: C.radiusSm, fontSize: 13, margin: '16px 16px 16px 16px' }}>
             Заявка хранит группы. Выдача выполняется по конкретной карточке и точному количеству.
           </div>
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
@@ -195,8 +335,8 @@ const RequestDetailPage: React.FC = () => {
 
       {request.status === 'APPROVED' && isInitiator && !canIssue && (
         <Panel style={{ marginBottom: 16 }}>
-          <div style={{ background: '#FFF8E1', color: '#F57F17', padding: '10px 14px', borderRadius: 6, fontSize: 13 }}>
-            Заявка утверждена и ожидает фактическую выдачу со стороны АХС/МОЛ.
+          <div style={{ background: C.warningBg, color: C.warning, padding: '10px 14px', borderRadius: C.radiusSm, fontSize: 13 }}>
+            Заявка согласована и ожидает фактическую выдачу со стороны ответственных АХС.
           </div>
         </Panel>
       )}
@@ -221,26 +361,101 @@ const RequestDetailPage: React.FC = () => {
         </Panel>
       )}
 
-      <div style={{ display: 'flex', gap: 10, marginTop: 8 }}>
-        {canSubmit && <Btn onClick={handleSubmit} loading={actionLoading}>📤 {t('requests.submit')}</Btn>}
+      <div style={{ display: 'flex', gap: 10, marginTop: 8, flexWrap: 'wrap' }}>
+        {canEdit && <Btn variant="secondary" onClick={() => navigate(`/requests/${request.id}/edit`)}><EditOutlined /> {t('common.edit')}</Btn>}
+        {canSubmit && <Btn onClick={handleSubmit} loading={actionLoading}><SendOutlined /> {isRevision ? 'Повторно отправить' : t('requests.submit')}</Btn>}
+        {canWithdraw && <Btn variant="secondary" onClick={() => setSimpleAction('withdraw')}><RollbackOutlined /> Отозвать</Btn>}
+        {canCancel && <Btn variant="danger" onClick={() => setSimpleAction('cancel')}><StopOutlined /> Отменить заявку</Btn>}
         {canApprove && (
           <>
-            <Btn onClick={() => { setOtpAction('approve'); setOtpModalOpen(true); }}>✅ {t('requests.approve')}</Btn>
-            <Btn variant="secondary" onClick={() => { setOtpAction('reject'); setOtpModalOpen(true); }} style={{ color: C.danger, borderColor: C.danger }}>
-              ❌ {t('requests.reject')}
+            <Btn onClick={() => openApprovalAction('approve')}><CheckOutlined /> {t('requests.approve')}</Btn>
+            <Btn variant="secondary" onClick={() => openApprovalAction('revision')}><RollbackOutlined /> На корректировку</Btn>
+            <Btn variant="secondary" onClick={() => openApprovalAction('reject')} style={{ color: C.danger, borderColor: C.danger }}>
+              <CloseOutlined /> {t('requests.reject')}
             </Btn>
           </>
         )}
       </div>
 
-      <OTPSignModal
-        open={otpModalOpen}
-        onCancel={() => { setOtpModalOpen(false); setOtpError(null); }}
-        onRequestOtp={handleRequestOtp}
-        onSign={handleSign}
-        loading={actionLoading}
-        error={otpError}
+      {actionError && (
+        <div style={{ background: C.dangerBg, color: C.danger, padding: '10px 14px', borderRadius: C.radiusSm, fontSize: 13, marginTop: 12 }}>
+          {actionError}
+        </div>
+      )}
+
+      <Popconfirm
+        open={!!simpleAction}
+        onClose={() => setSimpleAction(null)}
+        onConfirm={handleSimpleAction}
+        title={simpleAction === 'withdraw' ? 'Отозвать отправку на согласование?' : 'Отменить заявку?'}
+        confirmText={simpleAction === 'withdraw' ? 'Отозвать' : 'Отменить'}
       />
+
+      <Modal
+        open={!!approvalAction}
+        onClose={() => setApprovalAction(null)}
+        title={
+          approvalAction === 'approve'
+            ? isAhsIssueApprovalStep ? 'Отправить на выдачу' : 'Согласовать заявку'
+            : approvalAction === 'revision'
+              ? 'Отправить на корректировку'
+              : 'Отклонить заявку'
+        }
+        footer={(
+          <>
+            <Btn variant="secondary" onClick={() => setApprovalAction(null)}>Отмена</Btn>
+            <Btn
+              variant={approvalAction === 'reject' ? 'danger' : 'primary'}
+              loading={actionLoading}
+              onClick={() => approvalAction && handleApprovalAction(approvalAction)}
+            >
+              {approvalAction === 'approve' ? isAhsIssueApprovalStep ? 'Отправить на выдачу' : 'Согласовать' : approvalAction === 'revision' ? 'Отправить' : 'Отклонить'}
+            </Btn>
+          </>
+        )}
+      >
+        {actionError && (
+          <div style={{ background: C.dangerBg, color: C.danger, padding: '10px 12px', borderRadius: C.radiusSm, fontSize: 13, marginBottom: 14 }}>
+            {actionError}
+          </div>
+        )}
+        {approvalAction === 'approve' && isAhsIssueApprovalStep && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: C.heading }}>Ответственные за выдачу</div>
+            {issueResponsibleCandidates.length === 0 ? (
+              <div style={{ fontSize: 13, color: C.secondary }}>Сотрудники АХС не найдены</div>
+            ) : issueResponsibleCandidates.map((candidate) => (
+              <label key={candidate.id} style={{ display: 'flex', gap: 10, alignItems: 'center', fontSize: 13, color: C.text }}>
+                <input
+                  type="checkbox"
+                  checked={selectedIssueResponsibles.includes(candidate.id)}
+                  onChange={(e) => {
+                    setSelectedIssueResponsibles((prev) => (
+                      e.target.checked
+                        ? (prev.includes(candidate.id) ? prev : [...prev, candidate.id])
+                        : prev.filter((idValue) => idValue !== candidate.id)
+                    ));
+                  }}
+                />
+                <span>{candidate.full_name || candidate.username}{candidate.position ? ` · ${candidate.position}` : ''}</span>
+              </label>
+            ))}
+          </div>
+        )}
+
+        {approvalAction !== 'approve' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <label style={{ fontSize: 12, fontWeight: 700, color: C.heading }}>
+              {approvalAction === 'revision' ? 'Комментарий для корректировки *' : 'Комментарий'}
+            </label>
+            <textarea
+              value={actionComment}
+              onChange={(e) => setActionComment(e.target.value)}
+              style={{ ...inputStyle, minHeight: 110, resize: 'vertical' }}
+            />
+          </div>
+        )}
+      </Modal>
     </div>
   );
 };

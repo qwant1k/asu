@@ -19,7 +19,7 @@ class NotificationViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin,
     ordering_fields = ['created_at']
 
     def get_queryset(self):
-        return Notification.objects.filter(recipient=self.request.user)
+        return Notification.objects.select_related('related_content_type').filter(recipient=self.request.user)
 
     @action(detail=True, methods=['patch'])
     def read(self, request, pk=None):
@@ -39,6 +39,11 @@ class NotificationViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin,
             'detail': _('Все уведомления отмечены как прочитанные'),
             'count': count,
         })
+
+    @action(detail=False, methods=['post'], url_path='mark-all-read')
+    def mark_all_read(self, request):
+        """Alias for clients that use mark-all-read naming."""
+        return self.read_all(request)
 
     @action(detail=False, methods=['get'], url_path='unread-count')
     def unread_count(self, request):

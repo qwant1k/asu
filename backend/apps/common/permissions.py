@@ -2,6 +2,8 @@
 
 from rest_framework.permissions import BasePermission
 
+from apps.users.access import has_access, has_any_access
+
 
 class IsAdmin(BasePermission):
     """Доступ только для администраторов."""
@@ -11,7 +13,7 @@ class IsAdmin(BasePermission):
         return (
             request.user
             and request.user.is_authenticated
-            and request.user.role == 'ADMIN'
+            and has_access(request.user, 'system.admin')
         )
 
 
@@ -23,7 +25,7 @@ class IsAHSStaff(BasePermission):
         return (
             request.user
             and request.user.is_authenticated
-            and request.user.role in ('ADMIN', 'AHS_WORKER', 'AHS_HEAD')
+            and has_any_access(request.user, ('references.manage', 'requests.issue', 'requests.approve_ahs'))
         )
 
 
@@ -35,7 +37,7 @@ class IsAHSHead(BasePermission):
         return (
             request.user
             and request.user.is_authenticated
-            and request.user.role in ('ADMIN', 'AHS_HEAD')
+            and has_access(request.user, 'requests.approve_ahs')
         )
 
 
@@ -47,7 +49,7 @@ class IsMOLWarehouse(BasePermission):
         return (
             request.user
             and request.user.is_authenticated
-            and request.user.role in ('ADMIN', 'MOL_WAREHOUSE')
+            and has_any_access(request.user, ('warehouse.upload', 'warehouse.view'))
         )
 
 
@@ -59,7 +61,7 @@ class IsMOLNMA(BasePermission):
         return (
             request.user
             and request.user.is_authenticated
-            and request.user.role in ('ADMIN', 'MOL_NMA')
+            and has_any_access(request.user, ('warehouse.upload', 'warehouse.view'))
         )
 
 
@@ -71,7 +73,7 @@ class IsCommissionMember(BasePermission):
         return (
             request.user
             and request.user.is_authenticated
-            and request.user.role in ('ADMIN', 'COMMISSION_MEMBER')
+            and has_any_access(request.user, ('documents.manage', 'system.admin'))
         )
 
 
@@ -83,7 +85,7 @@ class IsDeptHead(BasePermission):
         return (
             request.user
             and request.user.is_authenticated
-            and request.user.role in ('ADMIN', 'DEPT_HEAD')
+            and has_access(request.user, 'requests.approve_department')
         )
 
 
@@ -105,7 +107,7 @@ class RoleBasedPermission(BasePermission):
             return False
 
         # Администратор имеет полный доступ
-        if request.user.role == 'ADMIN':
+        if has_access(request.user, 'system.admin'):
             return True
 
         # Получаем разрешённые роли для текущего действия
@@ -131,4 +133,4 @@ class ReadOnlyOrAHSStaff(BasePermission):
         if request.method in ('GET', 'HEAD', 'OPTIONS'):
             return True
 
-        return request.user.role in ('ADMIN', 'AHS_WORKER', 'AHS_HEAD')
+        return has_access(request.user, 'references.manage')

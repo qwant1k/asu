@@ -19,12 +19,17 @@ import ProfilePage from './features/profile/ProfilePage';
 import ReferencesPage from './features/references/ReferencesPage';
 import CounterpartiesPage from './features/references/CounterpartiesPage';
 import AssetsListPage from './features/references/AssetsListPage';
+import AssetCardPage from './features/references/AssetCardPage';
 import LimitsPage from './features/references/LimitsPage';
 import UsersPage from './features/references/UsersPage';
 import RequestTypesPage from './features/references/RequestTypesPage';
+import UnitsOfMeasurePage from './features/references/UnitsOfMeasurePage';
+import WarehousesPage from './features/references/WarehousesPage';
+import PositionsPage from './features/references/PositionsPage';
 
 /* Склад */
 import WarehouseStockPage from './features/warehouse/WarehouseStockPage';
+import StockUploadPage from './features/warehouse/StockUploadPage';
 import MovementsPage from './features/warehouse/MovementsPage';
 import AssignmentsPage from './features/warehouse/AssignmentsPage';
 
@@ -45,6 +50,7 @@ import ReportsPage from './features/reports/ReportsPage';
 
 /* Администрирование */
 import UsersAdminPage from './features/admin/UsersAdminPage';
+import AdminAccessPage from './features/admin/AdminAccessPage';
 import Sync1CPage from './features/admin/Sync1CPage';
 
 const App: React.FC = () => {
@@ -75,16 +81,24 @@ const App: React.FC = () => {
           <Route path="/references/limits" element={<LimitsPage />} />
           <Route path="/references/users" element={<UsersPage />} />
           <Route path="/references/request-types" element={<RequestTypesPage />} />
+          <Route path="/references/units-of-measure" element={<UnitsOfMeasurePage />} />
+          <Route path="/references/warehouses" element={<WarehousesPage />} />
+          <Route path="/references/positions" element={<PositionsPage />} />
           <Route path="/references/assets/:type" element={<AssetsListPage />} />
+
+          {/* Карточка позиции (ОС/НМА/ТМЗ) */}
+          <Route path="/assets/:id" element={<AssetCardPage />} />
 
           {/* Склад */}
           <Route path="/warehouse/stock" element={<WarehouseStockPage />} />
+          <Route path="/warehouse/stock/upload" element={<StockUploadPage />} />
           <Route path="/warehouse/movements" element={<MovementsPage />} />
           <Route path="/warehouse/assignments" element={<AssignmentsPage />} />
 
           {/* Заявки */}
           <Route path="/requests" element={<RequestsPage />} />
           <Route path="/requests/new" element={<RequestCreatePage />} />
+          <Route path="/requests/:id/edit" element={<RequestCreatePage />} />
           <Route path="/requests/:id" element={<RequestDetailPage />} />
 
           {/* Документы */}
@@ -118,6 +132,7 @@ const App: React.FC = () => {
 
           {/* Администрирование */}
           <Route path="/admin/users" element={<UsersAdminPage />} />
+          <Route path="/admin/access" element={<AdminAccessPage />} />
           <Route path="/admin/sync-1c" element={<Sync1CPage />} />
         </Route>
       </Route>

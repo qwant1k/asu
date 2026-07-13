@@ -28,6 +28,9 @@ class WarehouseStock(TimestampMixin):
     total_amount = models.DecimalField(
         _('Общая сумма'), max_digits=15, decimal_places=2, default=0,
     )
+    balance_date = models.DateField(
+        _('Дата остатка'), blank=True, null=True,
+    )
     location = models.CharField(
         _('Место хранения'), max_length=255, blank=True, default='',
     )

@@ -1,18 +1,48 @@
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useLocation, Outlet } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
+import {
+  AppstoreOutlined,
+  AuditOutlined,
+  BarChartOutlined,
+  BellOutlined,
+  BookOutlined,
+  DatabaseOutlined,
+  DownOutlined,
+  FileTextOutlined,
+  FormOutlined,
+  InboxOutlined,
+  LogoutOutlined,
+  RightOutlined,
+  SettingOutlined,
+  UserOutlined,
+} from '@ant-design/icons';
 import { useAppSelector, useAppDispatch } from '../../app/hooks';
 import { logoutThunk } from '../../features/auth/authSlice';
 import { C } from '../ui/primitives';
+import api from '../../api/axios';
+import type { Notification, PaginatedResponse } from '../types';
 
 interface NavItem {
   id: string;
-  icon: string;
+  icon: React.ReactNode;
   label: string;
   path?: string;
-  children?: { path: string; label: string }[];
+  children?: { path: string; label: string; roles?: string[]; access?: string }[];
   roles?: string[];
+  access?: string;
 }
+
+const navButtonBase: React.CSSProperties = {
+  width: '100%',
+  display: 'flex',
+  alignItems: 'center',
+  gap: 10,
+  border: 'none',
+  textAlign: 'left',
+  cursor: 'pointer',
+  transition: 'background 0.16s ease, color 0.16s ease, transform 0.16s ease',
+};
 
 const AppLayout: React.FC = () => {
   const { t } = useTranslation();
@@ -22,45 +52,68 @@ const AppLayout: React.FC = () => {
   const { user } = useAppSelector((state) => state.auth);
   const [openGroup, setOpenGroup] = useState<string | null>(null);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [notificationsNext, setNotificationsNext] = useState<string | null>(null);
+  const [notificationsLoading, setNotificationsLoading] = useState(false);
+  const [unreadCount, setUnreadCount] = useState(0);
 
   const role = user?.role || 'USER';
-  const isAdmin = role === 'ADMIN';
-  const isAHS = ['ADMIN', 'AHS_WORKER', 'AHS_HEAD'].includes(role);
-  const isMOL = ['ADMIN', 'MOL_WAREHOUSE', 'MOL_NMA'].includes(role);
-  const isReportViewer = ['ADMIN', 'AHS_HEAD', 'AHS_WORKER', 'MOL_WAREHOUSE', 'MOL_NMA'].includes(role);
+  const permissions = user?.effective_permissions || [];
+  const canAccess = useCallback((access?: string, fallbackRoles: string[] = []) => (
+    role === 'ADMIN' || (access ? permissions.includes(access) : false) || fallbackRoles.includes(role)
+  ), [permissions, role]);
+  const isAdmin = canAccess('system.admin', ['ADMIN'])
+    || canAccess('users.manage')
+    || canAccess('access.manage')
+    || canAccess('integrations.sync');
+  const canManageDocuments = canAccess('documents.manage', ['ADMIN', 'AHS_WORKER', 'AHS_HEAD', 'MOL_WAREHOUSE', 'MOL_NMA']);
+  const isReportViewer = canAccess('reports.view', ['ADMIN', 'AHS_HEAD', 'AHS_WORKER', 'MOL_WAREHOUSE', 'MOL_NMA']);
 
-  const nav: NavItem[] = [
-    { id: 'dashboard', icon: '⊞', label: t('nav.dashboard'), path: '/dashboard' },
-    { id: 'profile', icon: '👤', label: t('nav.profile'), path: '/profile' },
+  const nav: NavItem[] = useMemo(() => [
+    { id: 'dashboard', icon: <AppstoreOutlined />, label: t('nav.dashboard'), path: '/dashboard' },
+    { id: 'profile', icon: <UserOutlined />, label: t('nav.profile'), path: '/profile' },
     {
-      id: 'references', icon: '📖', label: t('nav.references'),
+      id: 'references',
+      icon: <BookOutlined />,
+      label: t('nav.references'),
       children: [
         { path: '/references/counterparties', label: t('nav.counterparties') },
         { path: '/references/users', label: t('nav.users') },
         { path: '/references/limits', label: t('nav.limits') },
         { path: '/references/request-types', label: t('nav.requestTypes') },
+        { path: '/references/units-of-measure', label: t('nav.unitsOfMeasure') },
+        { path: '/references/warehouses', label: t('nav.warehouses') },
+        { path: '/references/positions', label: t('nav.positions') },
         { path: '/references/assets/tmz', label: t('nav.assetsTmz') },
         { path: '/references/assets/os', label: t('nav.assetsOs') },
         { path: '/references/assets/nma', label: t('nav.assetsNma') },
       ],
     },
     {
-      id: 'warehouse', icon: '📦', label: t('nav.warehouse'),
+      id: 'warehouse',
+      icon: <InboxOutlined />,
+      label: t('nav.warehouse'),
       children: [
         { path: '/warehouse/stock', label: t('nav.stock') },
+        { path: '/warehouse/stock/upload', label: t('nav.uploadStock'), roles: ['ADMIN', 'MOL_WAREHOUSE', 'MOL_NMA'] },
         { path: '/warehouse/movements', label: t('nav.movements') },
         { path: '/warehouse/assignments', label: t('nav.assignments') },
       ],
     },
     {
-      id: 'requests', icon: '📋', label: t('nav.requests'),
+      id: 'requests',
+      icon: <FormOutlined />,
+      label: t('nav.requests'),
       children: [
         { path: '/requests', label: t('nav.requestJournal') },
         { path: '/requests/new', label: t('nav.newRequest') },
       ],
     },
-    ...((isMOL || isAHS) ? [{
-      id: 'documents', icon: '📄', label: t('nav.documents'),
+    ...(canManageDocuments ? [{
+      id: 'documents',
+      icon: <FileTextOutlined />,
+      label: t('nav.documents'),
       children: [
         { path: '/documents/incoming-invoices', label: t('nav.incomingInvoices') },
         { path: '/documents/write-off-acts', label: t('nav.writeOffActs') },
@@ -69,9 +122,11 @@ const AppLayout: React.FC = () => {
         { path: '/documents/internal-transfers', label: t('nav.internalTransfers') },
       ],
     }] : []),
-    { id: 'inventory', icon: '🪪', label: t('nav.inventory'), path: '/inventory' },
+    { id: 'inventory', icon: <AuditOutlined />, label: t('nav.inventory'), path: '/inventory' },
     ...(isReportViewer ? [{
-      id: 'reports', icon: '📊', label: t('nav.reports'),
+      id: 'reports',
+      icon: <BarChartOutlined />,
+      label: t('nav.reports'),
       children: [
         { path: '/reports/tmz-stock', label: t('reports.tmzStock') },
         { path: '/reports/os-balance', label: t('reports.osBalance') },
@@ -84,18 +139,24 @@ const AppLayout: React.FC = () => {
       ],
     }] : []),
     ...(isAdmin ? [{
-      id: 'admin', icon: '⚙', label: t('nav.admin'),
+      id: 'admin',
+      icon: <SettingOutlined />,
+      label: t('nav.admin'),
       children: [
-        { path: '/admin/users', label: t('nav.users') },
-        { path: '/admin/sync-1c', label: t('nav.sync1c') },
+        { path: '/admin/users', label: t('nav.users'), access: 'users.manage' },
+        { path: '/admin/access', label: 'Права доступа', access: 'access.manage' },
+        { path: '/admin/sync-1c', label: t('nav.sync1c'), access: 'integrations.sync' },
       ],
     }] : []),
-  ];
+  ], [canManageDocuments, isAdmin, isReportViewer, t]);
 
   const isActive = (item: NavItem) => {
     if (item.path) return location.pathname === item.path;
     return item.children?.some((c) => location.pathname.startsWith(c.path)) || false;
   };
+
+  const activeItem = nav.find((n) => isActive(n));
+  const activeGroupId = activeItem?.children ? activeItem.id : null;
 
   const handleLogout = () => {
     dispatch(logoutThunk());
@@ -108,101 +169,210 @@ const AppLayout: React.FC = () => {
 
   const currentDate = new Date().toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' });
 
+  const fetchNotifications = useCallback(async (append = false, nextUrl?: string | null) => {
+    if (!user) return;
+    setNotificationsLoading(true);
+    try {
+      const res = await api.get<PaginatedResponse<Notification>>(nextUrl || '/notifications/', {
+        params: nextUrl ? undefined : { page_size: 20, ordering: '-created_at' },
+      });
+      setNotifications((prev) => {
+        if (!append) return res.data.results;
+        const seen = new Set(prev.map((item) => item.id));
+        return [...prev, ...res.data.results.filter((item) => !seen.has(item.id))];
+      });
+      setNotificationsNext(res.data.next);
+    } catch {
+      if (!append) {
+        setNotifications([]);
+        setNotificationsNext(null);
+      }
+    } finally {
+      setNotificationsLoading(false);
+    }
+  }, [user]);
+
+  const fetchUnreadCount = useCallback(async () => {
+    if (!user) return;
+    try {
+      const res = await api.get<{ count: number }>('/notifications/unread-count/');
+      setUnreadCount(res.data.count || 0);
+    } catch {
+      setUnreadCount(0);
+    }
+  }, [user]);
+
+  useEffect(() => {
+    if (!user) return undefined;
+    fetchNotifications(false);
+    fetchUnreadCount();
+
+    const timer = window.setInterval(() => {
+      fetchNotifications(false);
+      fetchUnreadCount();
+    }, 60000);
+    return () => window.clearInterval(timer);
+  }, [fetchNotifications, fetchUnreadCount, user]);
+
+  const markAllNotificationsRead = async () => {
+    try {
+      await api.post('/notifications/mark-all-read/');
+      setNotifications((prev) => prev.map((item) => ({ ...item, is_read: true })));
+      setUnreadCount(0);
+    } catch { /* */ }
+  };
+
+  const getNotificationPath = (notification: Notification) => {
+    if (!notification.related_object_id) return '';
+    if (notification.related_model === 'assetrequest') return `/requests/${notification.related_object_id}`;
+    return '';
+  };
+
+  const openNotification = async (notification: Notification) => {
+    if (!notification.is_read) {
+      try {
+        await api.patch(`/notifications/${notification.id}/read/`);
+        setNotifications((prev) => prev.map((item) => (
+          item.id === notification.id ? { ...item, is_read: true } : item
+        )));
+        setUnreadCount((count) => Math.max(0, count - 1));
+      } catch { /* */ }
+    }
+
+    const path = getNotificationPath(notification);
+    if (path) {
+      setNotificationsOpen(false);
+      navigate(path);
+    }
+  };
+
   return (
-    <div style={{ display: 'flex', height: '100vh', background: C.bg }}>
-      {/* Sidebar */}
-      <aside style={{
-        width: 228, background: '#fff', borderRight: `1px solid ${C.border}`,
-        display: 'flex', flexDirection: 'column', flexShrink: 0,
-      }}>
-        {/* Logo */}
-        <div style={{ padding: '20px 20px 16px', borderBottom: `1px solid ${C.rowBorder}` }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <div style={{
-              width: 34, height: 34, background: C.accent, borderRadius: 8,
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-            }}>
-              <span style={{ color: '#fff', fontSize: 14, fontWeight: 700 }}>АУ</span>
+    <div style={{ display: 'flex', height: '100vh', background: 'linear-gradient(135deg, #E7ECF4 0%, #F7F9FC 48%, #EEF6FF 100%)' }}>
+      <aside
+        className="app-sidebar-graphite"
+        style={{
+          width: 264,
+          background: 'linear-gradient(180deg, rgba(17, 24, 39, 0.98) 0%, rgba(31, 41, 55, 0.96) 58%, rgba(15, 23, 42, 0.98) 100%)',
+          backdropFilter: 'blur(22px) saturate(1.35)',
+          WebkitBackdropFilter: 'blur(22px) saturate(1.35)',
+          borderRight: '1px solid rgba(255, 255, 255, 0.08)',
+          display: 'flex',
+          flexDirection: 'column',
+          flexShrink: 0,
+          boxShadow: '16px 0 46px rgba(15, 23, 42, 0.2)',
+          zIndex: 2,
+        }}
+      >
+        <div style={{ padding: '20px 18px 16px' }}>
+          <button
+            onClick={() => navigate('/dashboard')}
+            style={{
+              ...navButtonBase,
+              padding: 0,
+              background: 'transparent',
+              gap: 12,
+            }}
+          >
+            <div
+              style={{
+                width: 38,
+                height: 38,
+                background: 'linear-gradient(145deg, #38BDF8, #2563EB)',
+                borderRadius: 14,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                boxShadow: '0 14px 30px rgba(37, 99, 235, 0.34)',
+              }}
+            >
+              <DatabaseOutlined style={{ color: '#fff', fontSize: 17 }} />
             </div>
-            <div>
-              <div style={{ fontSize: 13, fontWeight: 700, color: C.heading, lineHeight: 1.2 }}>ИС «АСУ»</div>
-              <div style={{ fontSize: 11, color: C.muted }}>Учёт активов</div>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: 14, fontWeight: 800, color: C.heading, lineHeight: 1.2 }}>ИС «АСУ»</div>
+              <div style={{ fontSize: 12, color: C.secondary, marginTop: 2 }}>Учет активов</div>
             </div>
-          </div>
+          </button>
         </div>
 
-        {/* Nav */}
-        <nav style={{ flex: 1, padding: '12px 10px', overflowY: 'auto' }}>
-          <div style={{
-            fontSize: 11, color: C.muted, padding: '8px 10px 6px',
-            letterSpacing: '0.06em', fontWeight: 600, textTransform: 'uppercase',
-          }}>
-            Разделы
+        <nav style={{ flex: 1, padding: '8px 10px 12px', overflowY: 'auto' }}>
+          <div style={{ fontSize: 11, color: C.muted, padding: '8px 10px', fontWeight: 700, letterSpacing: 0 }}>
+            Меню
           </div>
           {nav.map((n) => {
             const active = isActive(n);
-            const expanded = openGroup === n.id;
+            const expanded = openGroup === n.id || (openGroup === null && activeGroupId === n.id);
+            const iconColor = active ? C.accentCyan : '#94A3B8';
             return (
-              <div key={n.id}>
+              <div key={n.id} style={{ marginBottom: 3 }}>
                 <button
+                  className="app-nav-button"
                   onClick={() => {
                     if (n.path) {
                       navigate(n.path);
                       setOpenGroup(null);
                     } else {
-                      setOpenGroup(expanded ? null : n.id);
+                      setOpenGroup(expanded ? '' : n.id);
                     }
                   }}
                   style={{
-                    width: '100%', display: 'flex', alignItems: 'center', gap: 10,
-                    padding: '9px 10px', borderRadius: 7, border: 'none',
-                    background: active ? C.accentLight : 'transparent',
-                    color: active ? C.accent : C.secondary,
-                    fontWeight: active ? 600 : 400,
-                    fontSize: 13, cursor: 'pointer', textAlign: 'left',
-                    transition: 'all 0.12s', marginBottom: 2,
+                    ...navButtonBase,
+                    padding: '10px 11px',
+                    borderRadius: 14,
+                    background: active ? 'rgba(56, 189, 248, 0.14)' : 'transparent',
+                    color: active ? '#F8FAFC' : '#CBD5E1',
+                    border: active ? '1px solid rgba(125, 211, 252, 0.22)' : '1px solid transparent',
+                    fontWeight: active ? 700 : 600,
+                    fontSize: 13,
+                    position: 'relative',
+                    boxShadow: active ? 'inset 0 1px 0 rgba(255, 255, 255, 0.08)' : 'none',
                   }}
-                  onMouseEnter={(e) => { if (!active) e.currentTarget.style.background = '#F9FAFB'; }}
-                  onMouseLeave={(e) => { if (!active) e.currentTarget.style.background = 'transparent'; }}
                 >
-                  <span style={{ fontSize: 15 }}>{n.icon}</span>
-                  {n.label}
+                  <span style={{ width: 22, display: 'inline-flex', justifyContent: 'center', color: iconColor, fontSize: 16 }}>
+                    {n.icon}
+                  </span>
+                  <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{n.label}</span>
                   {n.children && (
-                    <span style={{ marginLeft: 'auto', fontSize: 10, color: C.muted }}>
-                      {expanded ? '▾' : '▸'}
+                    <span style={{ color: active ? C.accentCyan : '#64748B', fontSize: 10, display: 'inline-flex' }}>
+                      {expanded ? <DownOutlined /> : <RightOutlined />}
                     </span>
                   )}
-                  {n.id === 'requests' && (
-                    <span style={{
-                      marginLeft: n.children ? 0 : 'auto',
-                      background: C.accent, color: '#fff', fontSize: 10, fontWeight: 700,
-                      padding: '1px 6px', borderRadius: 10,
-                    }}>●</span>
-                  )}
                 </button>
-                {n.children && expanded && (
-                  <div style={{ paddingLeft: 26, paddingBottom: 4 }}>
-                    {n.children.map((c) => {
-                      const childActive = location.pathname === c.path;
-                      return (
-                        <button
-                          key={c.path}
-                          onClick={() => navigate(c.path)}
-                          style={{
-                            width: '100%', display: 'block', padding: '6px 10px',
-                            borderRadius: 5, border: 'none', textAlign: 'left',
-                            background: childActive ? C.accentLight : 'transparent',
-                            color: childActive ? C.accent : C.secondary,
-                            fontWeight: childActive ? 600 : 400,
-                            fontSize: 12, cursor: 'pointer', marginBottom: 1,
-                          }}
-                          onMouseEnter={(e) => { if (!childActive) e.currentTarget.style.background = '#F9FAFB'; }}
-                          onMouseLeave={(e) => { if (!childActive) e.currentTarget.style.background = 'transparent'; }}
-                        >
-                          {c.label}
-                        </button>
-                      );
-                    })}
+
+                {n.children && (
+                  <div
+                    style={{
+                      maxHeight: expanded ? 360 : 0,
+                      opacity: expanded ? 1 : 0,
+                      overflow: 'hidden',
+                      transition: 'max-height 0.32s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.24s ease',
+                      paddingLeft: 30,
+                    }}
+                  >
+                    <div style={{ padding: '4px 0 5px' }}>
+                      {n.children
+                        .filter((c) => (!c.roles || c.roles.includes(role)) && (!c.access || canAccess(c.access)))
+                        .map((c) => {
+                          const childActive = location.pathname === c.path;
+                          return (
+                            <button
+                              key={c.path}
+                              className="app-nav-child"
+                              onClick={() => navigate(c.path)}
+                              style={{
+                                ...navButtonBase,
+                                padding: '7px 9px',
+                                borderRadius: 12,
+                                background: childActive ? 'rgba(255, 255, 255, 0.08)' : 'transparent',
+                                color: childActive ? C.accentCyan : '#94A3B8',
+                                fontWeight: childActive ? 700 : 500,
+                                fontSize: 12,
+                              }}
+                            >
+                              {c.label}
+                            </button>
+                          );
+                        })}
+                    </div>
                   </div>
                 )}
               </div>
@@ -210,91 +380,303 @@ const AppLayout: React.FC = () => {
           })}
         </nav>
 
-        {/* User */}
-        <div style={{
-          padding: '14px 16px', borderTop: `1px solid ${C.rowBorder}`,
-          display: 'flex', alignItems: 'center', gap: 10, position: 'relative',
-        }}>
-          <div style={{
-            width: 32, height: 32, borderRadius: '50%', background: C.accentLight,
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            fontSize: 12, fontWeight: 700, color: C.accent,
-            overflow: 'hidden',
-          }}>
-            {user?.photo
-              ? <img src={user.photo} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-              : initials}
-          </div>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 12, fontWeight: 600, color: C.heading, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {user?.short_name || user?.username}
-            </div>
-            <div style={{ fontSize: 11, color: C.muted }}>{user?.position || t(`roles.${role}`)}</div>
-          </div>
-          <span
+        <div style={{ padding: 12, borderTop: '1px solid rgba(255, 255, 255, 0.08)', position: 'relative' }}>
+          <button
             onClick={() => setUserMenuOpen(!userMenuOpen)}
-            style={{ fontSize: 16, color: C.muted, cursor: 'pointer' }}
-          >⚙</span>
+            style={{
+              ...navButtonBase,
+              gap: 10,
+              padding: 10,
+              borderRadius: 16,
+              background: 'rgba(255, 255, 255, 0.08)',
+              border: '1px solid rgba(255, 255, 255, 0.1)',
+            }}
+          >
+            <div
+              style={{
+                width: 34,
+                height: 34,
+                borderRadius: 13,
+                background: 'rgba(56, 189, 248, 0.16)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: 12,
+                fontWeight: 800,
+                color: C.accentCyan,
+                overflow: 'hidden',
+                flexShrink: 0,
+              }}
+            >
+              {user?.photo
+                ? <img src={user.photo} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                : initials}
+            </div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 12, fontWeight: 750, color: C.heading, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {user?.short_name || user?.username}
+              </div>
+              <div style={{ fontSize: 11, color: C.muted, marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {user?.position || t(`roles.${role}`)}
+              </div>
+            </div>
+            <DownOutlined style={{ color: C.muted, fontSize: 10 }} />
+          </button>
 
           {userMenuOpen && (
             <>
               <div onClick={() => setUserMenuOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 99 }} />
-              <div style={{
-                position: 'absolute', bottom: '100%', left: 10, right: 10,
-                background: '#fff', borderRadius: 8, border: `1px solid ${C.border}`,
-                boxShadow: '0 4px 16px rgba(0,0,0,0.1)', zIndex: 100, overflow: 'hidden',
-              }}>
+              <div
+                className="ui-modal"
+                style={{
+                  position: 'absolute',
+                  bottom: 'calc(100% + 8px)',
+                  left: 12,
+                  right: 12,
+                  background: 'rgba(255, 255, 255, 0.92)',
+                  backdropFilter: 'blur(20px) saturate(1.5)',
+                  WebkitBackdropFilter: 'blur(20px) saturate(1.5)',
+                  borderRadius: 14,
+                  border: `1px solid ${C.border}`,
+                  boxShadow: C.shadow,
+                  zIndex: 100,
+                  overflow: 'hidden',
+                }}
+              >
                 <button
                   onClick={() => { navigate('/profile'); setUserMenuOpen(false); }}
-                  style={{
-                    width: '100%', padding: '10px 14px', border: 'none', background: 'transparent',
-                    textAlign: 'left', fontSize: 13, color: C.text, cursor: 'pointer',
-                  }}
-                  onMouseEnter={(e) => { e.currentTarget.style.background = C.hoverRow; }}
-                  onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
-                >{t('nav.profile')}</button>
+                  className="app-menu-action"
+                  style={{ ...navButtonBase, padding: '11px 13px', background: 'transparent', fontSize: 13, color: C.text, fontWeight: 600 }}
+                >
+                  <UserOutlined />
+                  {t('nav.profile')}
+                </button>
                 <div style={{ height: 1, background: C.rowBorder }} />
                 <button
                   onClick={() => { handleLogout(); setUserMenuOpen(false); }}
-                  style={{
-                    width: '100%', padding: '10px 14px', border: 'none', background: 'transparent',
-                    textAlign: 'left', fontSize: 13, color: C.danger, cursor: 'pointer',
-                  }}
-                  onMouseEnter={(e) => { e.currentTarget.style.background = C.hoverRow; }}
-                  onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
-                >{t('auth.logout')}</button>
+                  className="app-menu-action"
+                  style={{ ...navButtonBase, padding: '11px 13px', background: 'transparent', fontSize: 13, color: C.danger, fontWeight: 650 }}
+                >
+                  <LogoutOutlined />
+                  {t('auth.logout')}
+                </button>
               </div>
             </>
           )}
         </div>
       </aside>
 
-      {/* Content area */}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-        {/* Topbar */}
-        <header style={{
-          height: 56, background: '#fff', borderBottom: `1px solid ${C.border}`,
-          display: 'flex', alignItems: 'center', padding: '0 28px', gap: 16, flexShrink: 0,
-        }}>
-          <div style={{ flex: 1, fontSize: 13, color: C.secondary }}>
-            {nav.find((n) => isActive(n))?.label || ''}
+        <header
+          style={{
+            height: 68,
+            background: 'rgba(255, 255, 255, 0.74)',
+            backdropFilter: 'blur(24px) saturate(1.35)',
+            WebkitBackdropFilter: 'blur(24px) saturate(1.35)',
+            borderBottom: `1px solid ${C.border}`,
+            display: 'flex',
+            alignItems: 'center',
+            padding: '0 30px',
+            gap: 16,
+            flexShrink: 0,
+            zIndex: 1,
+            boxShadow: '0 1px 0 rgba(255, 255, 255, 0.7), 0 12px 28px rgba(15, 23, 42, 0.04)',
+          }}
+        >
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 13, color: C.secondary, fontWeight: 750 }}>{activeItem?.label || ''}</div>
           </div>
           <div style={{ fontSize: 12, color: C.muted }}>{currentDate}</div>
-          <div style={{ width: 1, height: 20, background: C.border }} />
-          <button
-            onClick={() => navigate('/profile')}
-            style={{
-              background: C.rowBorder, border: 'none', borderRadius: 6,
-              padding: '7px 14px', fontSize: 12, color: C.text, cursor: 'pointer',
-            }}
-          >
-            🔔 {t('notifications.title')}
-          </button>
+          <div style={{ position: 'relative' }}>
+            <button
+              className="ui-icon-button"
+              onClick={() => {
+                const nextOpen = !notificationsOpen;
+                setNotificationsOpen(nextOpen);
+                if (nextOpen) {
+                  fetchNotifications(false);
+                  fetchUnreadCount();
+                }
+              }}
+              title={t('notifications.title')}
+              style={{
+                width: 36,
+                height: 36,
+                borderRadius: 14,
+                background: notificationsOpen ? 'rgba(56, 189, 248, 0.16)' : 'rgba(255, 255, 255, 0.78)',
+                border: `1px solid ${notificationsOpen ? 'rgba(14, 165, 233, 0.42)' : C.border}`,
+                color: notificationsOpen ? C.accent : C.text,
+                cursor: 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                position: 'relative',
+              }}
+            >
+              <BellOutlined />
+              {unreadCount > 0 && (
+                <span
+                  style={{
+                    position: 'absolute',
+                    top: -5,
+                    right: -5,
+                    minWidth: 18,
+                    height: 18,
+                    padding: '0 5px',
+                    borderRadius: 9,
+                    background: C.danger,
+                    color: C.white,
+                    border: `2px solid ${C.white}`,
+                    fontSize: 10,
+                    fontWeight: 800,
+                    lineHeight: '14px',
+                  }}
+                >
+                  {unreadCount > 99 ? '99+' : unreadCount}
+                </span>
+              )}
+            </button>
+
+            {notificationsOpen && (
+              <>
+                <div onClick={() => setNotificationsOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 90 }} />
+                <div
+                  className="ui-modal"
+                  style={{
+                    position: 'absolute',
+                    top: 'calc(100% + 10px)',
+                    right: 0,
+                    width: 380,
+                    maxWidth: 'calc(100vw - 48px)',
+                    background: 'rgba(255, 255, 255, 0.92)',
+                    backdropFilter: 'blur(20px) saturate(1.5)',
+                    WebkitBackdropFilter: 'blur(20px) saturate(1.5)',
+                    border: `1px solid ${C.border}`,
+                    borderRadius: 22,
+                    boxShadow: C.shadow,
+                    zIndex: 91,
+                    overflow: 'hidden',
+                  }}
+                >
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      gap: 12,
+                      padding: '13px 14px',
+                      borderBottom: `1px solid ${C.rowBorder}`,
+                    }}
+                  >
+                    <div>
+                      <div style={{ fontSize: 13, fontWeight: 800, color: C.heading }}>{t('notifications.title')}</div>
+                      <div style={{ fontSize: 11, color: C.secondary, marginTop: 2 }}>
+                        Непрочитанные: {unreadCount}
+                      </div>
+                    </div>
+                    <button
+                      onClick={markAllNotificationsRead}
+                      disabled={unreadCount === 0}
+                      style={{
+                        border: 'none',
+                        background: 'transparent',
+                        color: unreadCount > 0 ? C.accent : C.muted,
+                        cursor: unreadCount > 0 ? 'pointer' : 'default',
+                        fontSize: 12,
+                        fontWeight: 700,
+                      }}
+                    >
+                      Прочитать все
+                    </button>
+                  </div>
+
+                  <div style={{ maxHeight: 420, overflowY: 'auto' }}>
+                    {notifications.length === 0 && !notificationsLoading ? (
+                      <div style={{ padding: 18, fontSize: 13, color: C.secondary, textAlign: 'center' }}>
+                        {t('notifications.noNotifications')}
+                      </div>
+                    ) : (
+                      notifications.map((notification) => {
+                        const path = getNotificationPath(notification);
+                        return (
+                          <button
+                            key={notification.id}
+                            onClick={() => openNotification(notification)}
+                            style={{
+                              width: '100%',
+                              display: 'block',
+                              border: 'none',
+                              borderBottom: `1px solid ${C.rowBorder}`,
+                              background: notification.is_read ? 'rgba(255, 255, 255, 0.72)' : 'rgba(234, 243, 255, 0.92)',
+                              cursor: path || !notification.is_read ? 'pointer' : 'default',
+                              textAlign: 'left',
+                              padding: '12px 14px',
+                            }}
+                          >
+                            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+                              <span
+                                style={{
+                                  width: 8,
+                                  height: 8,
+                                  borderRadius: 4,
+                                  background: notification.is_read ? C.border : C.accentCyan,
+                                  marginTop: 5,
+                                  flexShrink: 0,
+                                }}
+                              />
+                              <span style={{ minWidth: 0, flex: 1 }}>
+                                <span style={{ display: 'block', fontSize: 13, fontWeight: 750, color: C.heading }}>
+                                  {notification.title}
+                                </span>
+                                {notification.body && (
+                                  <span style={{ display: 'block', fontSize: 12, color: C.secondary, marginTop: 4, lineHeight: 1.35 }}>
+                                    {notification.body}
+                                  </span>
+                                )}
+                                <span style={{ display: 'block', fontSize: 11, color: C.muted, marginTop: 7 }}>
+                                  {new Date(notification.created_at).toLocaleString('ru-KZ')}
+                                </span>
+                              </span>
+                            </div>
+                          </button>
+                        );
+                      })
+                    )}
+
+                    {notificationsLoading && (
+                      <div style={{ padding: 14, fontSize: 12, color: C.secondary, textAlign: 'center' }}>
+                        Загрузка...
+                      </div>
+                    )}
+
+                    {notificationsNext && !notificationsLoading && (
+                      <button
+                        onClick={() => fetchNotifications(true, notificationsNext)}
+                        style={{
+                          width: '100%',
+                          border: 'none',
+                          background: C.surfaceSoft,
+                          color: C.accent,
+                          cursor: 'pointer',
+                          padding: '11px 14px',
+                          fontSize: 12,
+                          fontWeight: 750,
+                        }}
+                      >
+                        Показать еще
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
         </header>
 
-        {/* Page content */}
-        <main style={{ flex: 1, overflow: 'auto', padding: 28 }}>
-          <Outlet />
+        <main style={{ flex: 1, overflow: 'auto', padding: 30 }}>
+          <div style={{ maxWidth: 1480, margin: '0 auto' }}>
+            <Outlet />
+          </div>
         </main>
       </div>
     </div>

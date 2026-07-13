@@ -378,12 +378,6 @@ class DocumentSignature(models.Model):
     role_label = models.CharField(
         _('Роль при подписании'), max_length=100, blank=True, default='',
     )
-    otp_code_hash = models.CharField(
-        _('Хэш OTP-кода'), max_length=64, blank=True, default='',
-    )
-    otp_expires_at = models.DateTimeField(
-        _('OTP действует до'), null=True, blank=True,
-    )
     signed_at = models.DateTimeField(
         _('Подписано'), null=True, blank=True,
     )

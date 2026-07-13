@@ -2,7 +2,8 @@
 from django.utils.translation import gettext_lazy as _
 from rest_framework import serializers
 
-from .models import Department, User
+from .access import ACCESS_DEFINITIONS, effective_access_codes
+from .models import Department, PositionAccessRule, User, UserAccessOverride
 
 
 class DepartmentSerializer(serializers.ModelSerializer):
@@ -24,6 +25,7 @@ class UserSerializer(serializers.ModelSerializer):
     photo = serializers.ImageField(read_only=True)
     department_name = serializers.CharField(source='department.name', read_only=True, default='')
     supervisor_name = serializers.CharField(source='supervisor.get_short_name', read_only=True, default='')
+    effective_permissions = serializers.SerializerMethodField()
 
     class Meta:
         model = User
@@ -43,11 +45,23 @@ class UserSerializer(serializers.ModelSerializer):
             'supervisor',
             'supervisor_name',
             'is_active',
+            'is_staff',
+            'is_superuser',
             'date_joined',
+            'last_login',
             'full_name',
             'short_name',
+            'effective_permissions',
         ]
-        read_only_fields = ['date_joined']
+        read_only_fields = ['date_joined', 'last_login', 'is_superuser']
+
+    def validate_supervisor(self, value):
+        if self.instance and value and value.id == self.instance.id:
+            raise serializers.ValidationError(_('Пользователь не может быть своим руководителем.'))
+        return value
+
+    def get_effective_permissions(self, obj):
+        return sorted(effective_access_codes(obj))
 
 
 class UserCreateSerializer(serializers.ModelSerializer):
@@ -71,6 +85,8 @@ class UserCreateSerializer(serializers.ModelSerializer):
             'phone',
             'role',
             'supervisor',
+            'is_active',
+            'is_staff',
         ]
 
     def create(self, validated_data):
@@ -79,6 +95,11 @@ class UserCreateSerializer(serializers.ModelSerializer):
         user.set_password(password)
         user.save()
         return user
+
+    def validate_supervisor(self, value):
+        if value and self.initial_data.get('username') == value.username:
+            raise serializers.ValidationError(_('Пользователь не может быть своим руководителем.'))
+        return value
 
 
 class UserProfileSerializer(serializers.ModelSerializer):
@@ -90,6 +111,7 @@ class UserProfileSerializer(serializers.ModelSerializer):
     remove_photo = serializers.BooleanField(write_only=True, required=False, default=False)
     department_name = serializers.CharField(source='department.name', read_only=True, default='')
     supervisor_name = serializers.CharField(source='supervisor.get_short_name', read_only=True, default='')
+    effective_permissions = serializers.SerializerMethodField()
 
     class Meta:
         model = User
@@ -113,8 +135,13 @@ class UserProfileSerializer(serializers.ModelSerializer):
             'full_name',
             'short_name',
             'date_joined',
+            'last_login',
+            'effective_permissions',
         ]
-        read_only_fields = ['id', 'username', 'role', 'date_joined', 'supervisor']
+        read_only_fields = ['id', 'username', 'role', 'date_joined', 'last_login', 'supervisor']
+
+    def get_effective_permissions(self, obj):
+        return sorted(effective_access_codes(obj))
 
     def update(self, instance, validated_data):
         remove_photo = validated_data.pop('remove_photo', False)
@@ -169,3 +196,60 @@ class LoginSerializer(serializers.Serializer):
 
         attrs['user'] = user
         return attrs
+
+
+class AccessDefinitionSerializer(serializers.Serializer):
+    code = serializers.CharField()
+    name = serializers.CharField()
+    category = serializers.CharField()
+    description = serializers.CharField()
+
+
+class PositionAccessRuleSerializer(serializers.ModelSerializer):
+    permission_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = PositionAccessRule
+        fields = [
+            'id',
+            'position',
+            'normalized_position',
+            'permission_code',
+            'permission_name',
+            'is_allowed',
+            'is_active',
+            'comment',
+            'created_at',
+            'updated_at',
+        ]
+        read_only_fields = ['normalized_position', 'created_at', 'updated_at']
+
+    def get_permission_name(self, obj):
+        match = next((item for item in ACCESS_DEFINITIONS if item.code == obj.permission_code), None)
+        return match.name if match else obj.permission_code
+
+
+class UserAccessOverrideSerializer(serializers.ModelSerializer):
+    user_name = serializers.CharField(source='user.get_full_name', read_only=True, default='')
+    username = serializers.CharField(source='user.username', read_only=True, default='')
+    permission_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = UserAccessOverride
+        fields = [
+            'id',
+            'user',
+            'user_name',
+            'username',
+            'permission_code',
+            'permission_name',
+            'mode',
+            'comment',
+            'created_at',
+            'updated_at',
+        ]
+        read_only_fields = ['created_at', 'updated_at']
+
+    def get_permission_name(self, obj):
+        match = next((item for item in ACCESS_DEFINITIONS if item.code == obj.permission_code), None)
+        return match.name if match else obj.permission_code

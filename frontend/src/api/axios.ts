@@ -52,6 +52,7 @@ api.interceptors.response.use(
           return Promise.reject(refreshError);
         }
       } else {
+        localStorage.removeItem('access_token');
         window.location.href = '/login';
       }
     }

@@ -124,17 +124,38 @@ const ProfilePage: React.FC = () => {
     try { await api.post('/notifications/mark-all-read/'); setNotifications((prev) => prev.map((n) => ({ ...n, is_read: true }))); } catch { /* */ }
   };
 
+  const openNotification = async (notification: Notification) => {
+    try {
+      if (!notification.is_read) {
+        await api.patch(`/notifications/${notification.id}/read/`);
+        setNotifications((prev) => prev.map((n) => (n.id === notification.id ? { ...n, is_read: true } : n)));
+      }
+    } catch { /* */ }
+
+    if (notification.related_model === 'assetrequest' && notification.related_object_id) {
+      navigate(`/requests/${notification.related_object_id}`);
+    }
+  };
+
   if (loading || !profileUser) return <Spinner />;
 
   return (
     <div>
       {/* Hero */}
-      <div style={{ background: 'linear-gradient(135deg, #1A56CC 0%, #0f3d8c 100%)', borderRadius: 12, padding: '32px 36px', marginBottom: 24, color: '#fff' }}>
+      <div style={{
+        background: 'linear-gradient(135deg, #111827 0%, #1F2937 58%, #0F172A 100%)',
+        borderRadius: C.radiusXl,
+        padding: '32px 36px',
+        marginBottom: 24,
+        color: '#fff',
+        border: '1px solid rgba(255, 255, 255, 0.08)',
+        boxShadow: '0 24px 60px rgba(15, 23, 42, 0.22)',
+      }}>
         <div style={{ display: 'flex', gap: 24, alignItems: 'center', flexWrap: 'wrap' }}>
           <div style={{
-            width: 88, height: 88, borderRadius: '50%', background: 'rgba(255,255,255,0.15)',
+            width: 88, height: 88, borderRadius: 24, background: 'rgba(56, 189, 248, 0.16)',
             display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 32, fontWeight: 700, flexShrink: 0,
-            overflow: 'hidden',
+            overflow: 'hidden', border: '1px solid rgba(125, 211, 252, 0.26)',
           }}>
             {currentPhoto ? <img src={currentPhoto} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : (profileUser.full_name?.[0] || '👤')}
           </div>
@@ -144,7 +165,7 @@ const ProfilePage: React.FC = () => {
             <p style={{ fontSize: 13, opacity: 0.85, margin: 0 }}>
               {profileUser.position || 'Сотрудник'}{profileUser.department_name ? ` · ${profileUser.department_name}` : ''}
             </p>
-            <div style={{ display: 'flex', gap: 16, marginTop: 8, flexWrap: 'wrap', fontSize: 12, opacity: 0.8 }}>
+            <div style={{ display: 'flex', gap: 16, marginTop: 8, flexWrap: 'wrap', fontSize: 12, opacity: 0.82 }}>
               <span>📧 {profileUser.email || 'Email не указан'}</span>
               <span>📞 {profileUser.phone || 'Телефон не указан'}</span>
               <span>👔 {profileUser.supervisor_name || 'Руководитель не назначен'}</span>
@@ -153,13 +174,13 @@ const ProfilePage: React.FC = () => {
         </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16, marginBottom: 24 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 16, marginBottom: 24 }}>
         <StatCard label="Профиль заполнен" value={`${completionPercent}%`} />
         <StatCard label="История заявок" value={requests.length} />
         <StatCard label={isOwnProfile ? 'Непрочитанные' : 'Дата регистрации'} value={isOwnProfile ? unreadCount : fmt(profileUser.date_joined)} />
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 20 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 360px), 1fr))', gap: 20 }}>
         {/* Left */}
         <div>
           <Panel title={t('profile.personalInfo')}
@@ -204,7 +225,7 @@ const ProfilePage: React.FC = () => {
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                 {requests.map((r) => (
                   <div key={r.id} onClick={() => navigate(`/requests/${r.id}`)} style={{
-                    padding: '10px 14px', borderRadius: 6, cursor: 'pointer',
+                    padding: '10px 14px', borderRadius: C.radiusSm, cursor: 'pointer', background: C.glassStrong,
                     border: `1px solid ${C.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                     transition: 'border-color 0.15s',
                   }}
@@ -244,7 +265,10 @@ const ProfilePage: React.FC = () => {
               {notifications.length === 0 ? <EmptyState text={t('notifications.noNotifications')} /> : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                   {notifications.map((n) => (
-                    <div key={n.id} style={{ padding: '8px 12px', borderRadius: 6, background: n.is_read ? '#fff' : C.accentLight, border: `1px solid ${C.border}` }}>
+                    <div key={n.id} onClick={() => openNotification(n)} style={{
+                      padding: '10px 12px', borderRadius: C.radiusSm, background: n.is_read ? C.glassStrong : C.accentLight,
+                      border: `1px solid ${C.border}`, cursor: n.related_object_id ? 'pointer' : 'default',
+                    }}>
                       <div style={{ fontSize: 13, fontWeight: n.is_read ? 400 : 600, color: C.heading }}>{n.title}</div>
                       <div style={{ fontSize: 12, color: C.secondary }}>{n.body}</div>
                       <div style={{ fontSize: 11, color: C.muted, marginTop: 2 }}>{fmt(n.created_at)}</div>

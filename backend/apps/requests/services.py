@@ -1,9 +1,5 @@
-﻿"""Сервисы OTP и workflow заявок ИС «АСУ»."""
+﻿"""Сервисы workflow заявок ИС «АСУ»."""
 
-import hashlib
-import random
-import string
-from datetime import timedelta
 from decimal import Decimal
 
 from django.db import transaction
@@ -13,8 +9,12 @@ from django.utils.translation import gettext_lazy as _
 from apps.common.constants import (
     APPROVAL_APPROVED,
     APPROVAL_REJECTED,
-    OTP_CODE_LENGTH,
-    OTP_EXPIRY_MINUTES,
+    APPROVAL_SENT_TO_REVISION,
+    APPROVAL_SUBMITTED,
+    APPROVAL_WITHDRAWN,
+    NOTIFICATION_REQUEST_STATUS,
+    NOTIFICATION_REQUEST_TO_APPROVE,
+    NOTIFICATION_REQUEST_TO_ISSUE,
     REQUEST_APPROVED,
     REQUEST_APPROVED_AHS_HEAD,
     REQUEST_APPROVED_MOL,
@@ -24,71 +24,38 @@ from apps.common.constants import (
     REQUEST_EXECUTED,
     REQUEST_PENDING_SUPERVISOR,
     REQUEST_REJECTED,
+    REQUEST_SENT_FOR_REVISION,
     ROLE_ADMIN,
     ROLE_AHS_HEAD,
     ROLE_AHS_WORKER,
     ROLE_DEPT_HEAD,
-    ROLE_MOL_NMA,
-    ROLE_MOL_WAREHOUSE,
 )
+from apps.users.access import APPROVER_ROLE_ACCESS, has_access
 
 from .models import AssetRequest, RequestApproval
-
-
-class OTPService:
-    """Сервис генерации и верификации OTP-кодов."""
-
-    @staticmethod
-    def generate_otp():
-        code = ''.join(random.choices(string.digits, k=OTP_CODE_LENGTH))
-        return code
-
-    @staticmethod
-    def hash_otp(code: str) -> str:
-        return hashlib.sha256(code.encode('utf-8')).hexdigest()
-
-    @staticmethod
-    def verify_otp(stored_hash: str, code: str) -> bool:
-        return OTPService.hash_otp(code) == stored_hash
-
-    @staticmethod
-    def get_expiry_time():
-        return timezone.now() + timedelta(minutes=OTP_EXPIRY_MINUTES)
-
-    @staticmethod
-    def is_expired(expires_at) -> bool:
-        if expires_at is None:
-            return True
-        return timezone.now() > expires_at
 
 
 class RequestWorkflowService:
     """Сервис управления жизненным циклом заявки."""
 
-    TRANSITION_MAP = {
-        REQUEST_PENDING_SUPERVISOR: {
-            'next': REQUEST_APPROVED_SUPERVISOR,
-            'role': ROLE_DEPT_HEAD,
-        },
-        REQUEST_APPROVED_SUPERVISOR: {
-            'next': REQUEST_APPROVED_MOL,
-            'role': None,
-        },
-        REQUEST_APPROVED_MOL: {
-            'next': REQUEST_APPROVED_AHS_HEAD,
-            'role': ROLE_AHS_HEAD,
-        },
-        REQUEST_APPROVED_AHS_HEAD: {
-            'next': REQUEST_APPROVED,
-            'role': None,
-        },
-    }
+    PENDING_STATUSES = (
+        REQUEST_PENDING_SUPERVISOR,
+        REQUEST_APPROVED_SUPERVISOR,
+        REQUEST_APPROVED_MOL,
+        REQUEST_APPROVED_AHS_HEAD,
+    )
+    EDITABLE_STATUSES = (REQUEST_DRAFT, REQUEST_SENT_FOR_REVISION)
+    RESET_ACTIONS = (APPROVAL_SENT_TO_REVISION, APPROVAL_WITHDRAWN)
+    ISSUE_ROLES = (ROLE_AHS_WORKER, ROLE_AHS_HEAD)
 
     @staticmethod
     @transaction.atomic
-    def submit(request_obj: AssetRequest):
-        if request_obj.status != REQUEST_DRAFT:
-            raise ValueError(_('Отправить на согласование можно только черновик'))
+    def submit(request_obj: AssetRequest, user=None):
+        if request_obj.status not in RequestWorkflowService.EDITABLE_STATUSES:
+            raise ValueError(_('Отправить на согласование можно только черновик или заявку на корректировке'))
+
+        if user and request_obj.initiator_id != user.id:
+            raise ValueError(_('Отправить заявку может только инициатор'))
 
         if not request_obj.items.exists():
             raise ValueError(_('Заявка не содержит позиций'))
@@ -96,55 +63,271 @@ class RequestWorkflowService:
         if request_obj.items.filter(requested_group__isnull=True, asset__isnull=True).exists():
             raise ValueError(_('Каждая позиция заявки должна быть привязана к группе справочника'))
 
-        request_obj.status = REQUEST_PENDING_SUPERVISOR
+        step = RequestWorkflowService.get_current_step(request_obj)
+        if step and step[1] and not RequestWorkflowService.get_supervisor_approver(request_obj):
+            raise ValueError(_('Для инициатора не задан руководитель подразделения или непосредственный руководитель'))
+
+        request_obj.status = RequestWorkflowService.status_for_completed_steps(request_obj)
         request_obj.save(update_fields=['status', 'updated_at'])
+
+        RequestApproval.objects.create(
+            request=request_obj,
+            approver=user or request_obj.initiator,
+            role_at_approval=(user or request_obj.initiator).role,
+            action=APPROVAL_SUBMITTED,
+            signed_at=timezone.now(),
+        )
+        RequestWorkflowService.notify_current_approvers(request_obj)
         return request_obj
 
     @staticmethod
+    def get_approval_roles(request_obj: AssetRequest):
+        """Упорядоченный маршрут согласования: список (роль, только_руководитель).
+
+        Заявка сначала согласуется руководителем подразделения создателя,
+        затем руководителем АХС, который назначает ответственного за выдачу.
+        """
+        return [
+            (ROLE_DEPT_HEAD, True),
+            (ROLE_AHS_HEAD, False),
+        ]
+
+    @staticmethod
+    def current_cycle_started_at(request_obj: AssetRequest):
+        """Return timestamp of the latest event that restarts approval progress."""
+        event = request_obj.approvals.filter(
+            action__in=RequestWorkflowService.RESET_ACTIONS,
+        ).order_by('-created_at').first()
+        return event.created_at if event else None
+
+    @staticmethod
+    def completed_step_count(request_obj: AssetRequest) -> int:
+        """Количество уже пройденных (подписанных) этапов согласования."""
+        qs = request_obj.approvals.filter(
+            action=APPROVAL_APPROVED, signed_at__isnull=False,
+        )
+        cycle_started_at = RequestWorkflowService.current_cycle_started_at(request_obj)
+        if cycle_started_at:
+            qs = qs.filter(created_at__gt=cycle_started_at)
+        return qs.count()
+
+    @staticmethod
+    def get_supervisor_approver(request_obj: AssetRequest):
+        """Return direct approver from user.supervisor or department.head."""
+        initiator = request_obj.initiator
+        if getattr(initiator, 'supervisor_id', None):
+            return initiator.supervisor
+        department = getattr(initiator, 'department', None)
+        if department and getattr(department, 'head_id', None):
+            return department.head
+        return None
+
+    @staticmethod
+    def status_for_completed_steps(request_obj: AssetRequest):
+        roles = RequestWorkflowService.get_approval_roles(request_obj)
+        completed = RequestWorkflowService.completed_step_count(request_obj)
+        if completed >= len(roles):
+            return REQUEST_APPROVED
+        if completed == 0:
+            return REQUEST_PENDING_SUPERVISOR
+        return REQUEST_APPROVED_SUPERVISOR
+
+    @staticmethod
+    def get_current_step(request_obj: AssetRequest):
+        """Текущий этап (роль, только_руководитель) или None, если согласование завершено."""
+        roles = RequestWorkflowService.get_approval_roles(request_obj)
+        idx = RequestWorkflowService.completed_step_count(request_obj)
+        if idx >= len(roles):
+            return None
+        return roles[idx]
+
+    @staticmethod
+    def get_required_approver_role(request_obj: AssetRequest):
+        """Роль, которая должна согласовать заявку на текущем этапе (None — не этап согласования)."""
+        if request_obj.status not in RequestWorkflowService.PENDING_STATUSES:
+            return None
+        step = RequestWorkflowService.get_current_step(request_obj)
+        return step[0] if step else None
+
+    @staticmethod
+    def check_can_approve(request_obj: AssetRequest, approver):
+        """Проверяет право пользователя согласовать заявку на текущем этапе. Бросает ValueError, если нет прав."""
+        if request_obj.status not in RequestWorkflowService.PENDING_STATUSES:
+            raise ValueError(_('Заявка не находится на этапе согласования'))
+
+        step = RequestWorkflowService.get_current_step(request_obj)
+        if step is None:
+            raise ValueError(_('Заявка не находится на этапе согласования'))
+
+        required_role, requires_supervisor = step
+
+        access_code = APPROVER_ROLE_ACCESS.get(required_role)
+
+        if has_access(approver, 'system.admin'):
+            return
+
+        if approver.role != required_role and not (access_code and has_access(approver, access_code)):
+            raise ValueError(_('У вас нет прав для согласования заявки на этом этапе'))
+
+        if requires_supervisor:
+            supervisor = RequestWorkflowService.get_supervisor_approver(request_obj)
+            if not supervisor or supervisor.id != approver.id:
+                raise ValueError(_('Согласовать заявку может только непосредственный руководитель инициатора'))
+
+    @staticmethod
+    def can_approve(request_obj: AssetRequest, user) -> bool:
+        """Безопасная (не бросающая исключение) проверка права согласования — для сериализаторов/фильтров."""
+        try:
+            RequestWorkflowService.check_can_approve(request_obj, user)
+            return True
+        except ValueError:
+            return False
+
+    @staticmethod
+    def get_current_approvers(request_obj: AssetRequest):
+        """Users who should act on the current approval step."""
+        step = RequestWorkflowService.get_current_step(request_obj)
+        if not step:
+            return []
+
+        required_role, requires_supervisor = step
+        if requires_supervisor:
+            supervisor = RequestWorkflowService.get_supervisor_approver(request_obj)
+            return [supervisor] if supervisor and supervisor.is_active else []
+
+        from apps.users.models import User
+
+        access_code = APPROVER_ROLE_ACCESS.get(required_role)
+        users = list(User.objects.filter(is_active=True))
+        return [
+            user for user in users
+            if user.role == required_role or (access_code and has_access(user, access_code))
+        ]
+
+    @staticmethod
+    def notify_current_approvers(request_obj: AssetRequest):
+        """Create approval task notifications for the users on the current step."""
+        from apps.notifications.services import NotificationService
+
+        recipients = {
+            user.id: user
+            for user in RequestWorkflowService.get_current_approvers(request_obj)
+            if user and user.id != request_obj.initiator_id
+        }
+        for recipient in recipients.values():
+            NotificationService.send(
+                recipient=recipient,
+                notification_type=NOTIFICATION_REQUEST_TO_APPROVE,
+                title=_('Заявка №%(number)s ожидает согласования') % {'number': request_obj.number},
+                body=_('%(initiator)s отправил(а) заявку на согласование.') % {
+                    'initiator': request_obj.initiator.get_full_name() or request_obj.initiator.username,
+                },
+                related_object=request_obj,
+            )
+
+    @staticmethod
+    def notify_initiator(request_obj: AssetRequest, title, body):
+        from apps.notifications.services import NotificationService
+
+        NotificationService.send(
+            recipient=request_obj.initiator,
+            notification_type=NOTIFICATION_REQUEST_STATUS,
+            title=title,
+            body=body,
+            related_object=request_obj,
+        )
+
+    @staticmethod
+    def assign_issue_responsibles(request_obj: AssetRequest, user_ids=None):
+        """Assign active AHS users responsible for actual issue."""
+        from apps.users.models import User
+
+        if not user_ids:
+            raise ValueError(_('Выберите ответственного за выдачу'))
+
+        qs = User.objects.filter(is_active=True, id__in=user_ids)
+
+        responsibles = [
+            candidate for candidate in qs
+            if candidate.role in RequestWorkflowService.ISSUE_ROLES or has_access(candidate, 'requests.issue')
+        ]
+        if not responsibles:
+            raise ValueError(_('Выбранные ответственные за выдачу не найдены среди активных сотрудников АХС'))
+
+        request_obj.issue_responsibles.set(responsibles)
+        return responsibles
+
+    @staticmethod
+    def notify_issue_responsibles(request_obj: AssetRequest, responsibles):
+        from apps.notifications.services import NotificationService
+
+        for responsible in {user.id: user for user in responsibles}.values():
+            NotificationService.send(
+                recipient=responsible,
+                notification_type=NOTIFICATION_REQUEST_TO_ISSUE,
+                title=_('Заявка №%(number)s готова к выдаче') % {'number': request_obj.number},
+                body=_('Заявка согласована. Необходимо выполнить выдачу товаров сотруднику %(recipient)s.') % {
+                    'recipient': (request_obj.to_user or request_obj.initiator).get_full_name()
+                    or (request_obj.to_user or request_obj.initiator).username,
+                },
+                related_object=request_obj,
+            )
+
+    @staticmethod
+    def can_edit(request_obj: AssetRequest, user) -> bool:
+        return request_obj.initiator_id == user.id and request_obj.status in RequestWorkflowService.EDITABLE_STATUSES
+
+    @staticmethod
+    def check_can_issue(request_obj: AssetRequest, user):
+        if request_obj.status != REQUEST_APPROVED:
+            raise ValueError(_('Выдача доступна только для согласованной заявки'))
+
+        if has_access(user, 'system.admin'):
+            return
+
+        if user.role not in RequestWorkflowService.ISSUE_ROLES and not has_access(user, 'requests.issue'):
+            raise ValueError(_('У вас нет прав на выдачу активов по заявке'))
+
+        if request_obj.issue_responsibles.exists() and not request_obj.issue_responsibles.filter(id=user.id).exists():
+            raise ValueError(_('Вы не назначены ответственным за выдачу по этой заявке'))
+
+    @staticmethod
+    def can_issue(request_obj: AssetRequest, user) -> bool:
+        try:
+            RequestWorkflowService.check_can_issue(request_obj, user)
+            return True
+        except ValueError:
+            return False
+
+    @staticmethod
     @transaction.atomic
-    def generate_otp_for_approval(request_obj: AssetRequest, approver):
-        otp_code = OTPService.generate_otp()
-        otp_hash = OTPService.hash_otp(otp_code)
+    def approve(request_obj: AssetRequest, approver, issue_responsible_ids=None):
+        RequestWorkflowService.check_can_approve(request_obj, approver)
 
         RequestApproval.objects.create(
             request=request_obj,
             approver=approver,
             role_at_approval=approver.role,
             action=APPROVAL_APPROVED,
-            otp_code=otp_hash,
-            otp_expires_at=OTPService.get_expiry_time(),
+            signed_at=timezone.now(),
         )
 
-        return otp_code
+        request_obj.status = RequestWorkflowService.status_for_completed_steps(request_obj)
+        request_obj.save(update_fields=['status', 'updated_at'])
 
-    @staticmethod
-    @transaction.atomic
-    def approve(request_obj: AssetRequest, approver, otp_code: str):
-        approval = RequestApproval.objects.filter(
-            request=request_obj,
-            approver=approver,
-            signed_at__isnull=True,
-        ).order_by('-created_at').first()
-
-        if not approval:
-            raise ValueError(_('Запись согласования не найдена'))
-
-        if OTPService.is_expired(approval.otp_expires_at):
-            raise ValueError(_('Срок действия OTP-кода истёк'))
-
-        if not OTPService.verify_otp(approval.otp_code, otp_code):
-            raise ValueError(_('Неверный OTP-код'))
-
-        approval.signed_at = timezone.now()
-        approval.action = APPROVAL_APPROVED
-        approval.save(update_fields=['signed_at', 'action'])
-
-        transition = RequestWorkflowService.TRANSITION_MAP.get(request_obj.status)
-        if transition:
-            request_obj.status = transition['next']
-            if request_obj.status == REQUEST_APPROVED_AHS_HEAD:
-                request_obj.status = REQUEST_APPROVED
-            request_obj.save(update_fields=['status', 'updated_at'])
+        if request_obj.status == REQUEST_APPROVED:
+            responsibles = RequestWorkflowService.assign_issue_responsibles(
+                request_obj,
+                issue_responsible_ids,
+            )
+            RequestWorkflowService.notify_issue_responsibles(request_obj, responsibles)
+            RequestWorkflowService.notify_initiator(
+                request_obj,
+                _('Заявка №%(number)s согласована') % {'number': request_obj.number},
+                _('Заявка согласована и передана ответственным АХС на выдачу.'),
+            )
+        else:
+            RequestWorkflowService.notify_current_approvers(request_obj)
 
         return request_obj
 
@@ -159,6 +342,8 @@ class RequestWorkflowService:
         ):
             raise ValueError(_('Невозможно отклонить заявку в текущем статусе'))
 
+        RequestWorkflowService.check_can_approve(request_obj, approver)
+
         RequestApproval.objects.create(
             request=request_obj,
             approver=approver,
@@ -170,6 +355,48 @@ class RequestWorkflowService:
 
         request_obj.status = REQUEST_REJECTED
         request_obj.save(update_fields=['status', 'updated_at'])
+        RequestWorkflowService.notify_initiator(
+            request_obj,
+            _('Заявка №%(number)s отклонена') % {'number': request_obj.number},
+            comment or _('Заявка отклонена согласующим.'),
+        )
+        return request_obj
+
+    @staticmethod
+    @transaction.atomic
+    def send_to_revision(request_obj: AssetRequest, approver, comment: str = ''):
+        if request_obj.status in (
+            REQUEST_DRAFT,
+            REQUEST_SENT_FOR_REVISION,
+            REQUEST_EXECUTED,
+            REQUEST_REJECTED,
+            REQUEST_CANCELLED,
+        ):
+            raise ValueError(_('Невозможно отправить заявку на корректировку в текущем статусе'))
+
+        if not comment:
+            raise ValueError(_('Укажите комментарий для корректировки'))
+
+        RequestWorkflowService.check_can_approve(request_obj, approver)
+
+        RequestApproval.objects.create(
+            request=request_obj,
+            approver=approver,
+            role_at_approval=approver.role,
+            action=APPROVAL_SENT_TO_REVISION,
+            signed_at=timezone.now(),
+            comment=comment,
+        )
+
+        request_obj.status = REQUEST_SENT_FOR_REVISION
+        request_obj.save(update_fields=['status', 'updated_at'])
+        request_obj.issue_responsibles.clear()
+
+        RequestWorkflowService.notify_initiator(
+            request_obj,
+            _('Заявка №%(number)s отправлена на корректировку') % {'number': request_obj.number},
+            comment,
+        )
         return request_obj
 
     @staticmethod
@@ -187,18 +414,32 @@ class RequestWorkflowService:
 
     @staticmethod
     @transaction.atomic
-    def issue_items(request_obj: AssetRequest, user, items_data):
-        if request_obj.status != REQUEST_APPROVED:
-            raise ValueError(_('Выдача доступна только для утверждённой заявки'))
+    def withdraw(request_obj: AssetRequest, user):
+        if request_obj.initiator_id != user.id:
+            raise ValueError(_('Отозвать заявку может только инициатор'))
 
-        if user.role not in (
-            ROLE_ADMIN,
-            ROLE_AHS_WORKER,
-            ROLE_AHS_HEAD,
-            ROLE_MOL_WAREHOUSE,
-            ROLE_MOL_NMA,
-        ):
-            raise ValueError(_('У вас нет прав на выдачу активов по заявке'))
+        if request_obj.status not in RequestWorkflowService.PENDING_STATUSES:
+            raise ValueError(_('Отозвать можно только заявку, отправленную на согласование'))
+
+        if RequestWorkflowService.completed_step_count(request_obj) > 0:
+            raise ValueError(_('Заявку уже начали согласовывать, отзыв недоступен'))
+
+        RequestApproval.objects.create(
+            request=request_obj,
+            approver=user,
+            role_at_approval=user.role,
+            action=APPROVAL_WITHDRAWN,
+            signed_at=timezone.now(),
+        )
+
+        request_obj.status = REQUEST_DRAFT
+        request_obj.save(update_fields=['status', 'updated_at'])
+        return request_obj
+
+    @staticmethod
+    @transaction.atomic
+    def issue_items(request_obj: AssetRequest, user, items_data):
+        RequestWorkflowService.check_can_issue(request_obj, user)
 
         if not items_data:
             raise ValueError(_('Не переданы позиции для выдачи'))
@@ -261,6 +502,11 @@ class RequestWorkflowService:
 
         request_obj.status = REQUEST_EXECUTED
         request_obj.save(update_fields=['status', 'updated_at'])
+        RequestWorkflowService.notify_initiator(
+            request_obj,
+            _('Заявка №%(number)s выдана') % {'number': request_obj.number},
+            _('Товары по заявке выданы ответственным сотрудником АХС.'),
+        )
         return request_obj
 
     @staticmethod

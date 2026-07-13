@@ -4,8 +4,9 @@ import api from '../../api/axios';
 import type { LimitNorm, Department, PaginatedResponse } from '../../shared/types';
 import {
   C, PageHeader, Btn, Th, Td, Badge, Modal, InputField, SelectField,
-  Spinner, EmptyState, hoverRow,
+  Spinner, EmptyState, hoverRow, Surface, FilterBar,
 } from '../../shared/ui/primitives';
+import { toLocalDateInputValue } from '../../shared/utils/date';
 
 const PAGE_SIZE = 20;
 
@@ -57,7 +58,7 @@ const LimitsPage: React.FC = () => {
   useEffect(() => { fetchData(); }, [fetchData]);
 
   const isActive = (item: LimitNorm) => {
-    const today = new Date().toISOString().slice(0, 10);
+    const today = toLocalDateInputValue();
     return item.valid_from <= today && item.valid_to >= today;
   };
 
@@ -105,22 +106,22 @@ const LimitsPage: React.FC = () => {
     <div>
       <PageHeader title={t('references.limits.title')} right={<Btn onClick={openCreate}>+ {t('common.add')}</Btn>} />
 
-      <div style={{ display: 'flex', gap: 10, marginBottom: 16, flexWrap: 'wrap' }}>
+      <FilterBar>
         <input placeholder={t('common.search')} value={search}
           onChange={(e) => { setSearch(e.target.value); setPage(1); }}
-          style={{ padding: '8px 14px', border: `1px solid ${C.inputBorder}`, borderRadius: 6, fontSize: 13, width: 250, outline: 'none' }}
+          style={{ padding: '8px 14px', border: `1px solid ${C.inputBorder}`, borderRadius: C.radiusSm, fontSize: 13, width: 250, outline: 'none', background: C.glassStrong }}
         />
         <select value={filterType} onChange={(e) => { setFilterType(e.target.value); setPage(1); }}
-          style={{ padding: '8px 12px', border: `1px solid ${C.inputBorder}`, borderRadius: 6, fontSize: 13, color: C.secondary, background: '#fff' }}>
+          style={{ padding: '8px 12px', border: `1px solid ${C.inputBorder}`, borderRadius: C.radiusSm, fontSize: 13, color: C.secondary, background: C.glassStrong }}>
           {typeOpts.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
         </select>
         <select value={filterDept} onChange={(e) => { setFilterDept(e.target.value); setPage(1); }}
-          style={{ padding: '8px 12px', border: `1px solid ${C.inputBorder}`, borderRadius: 6, fontSize: 13, color: C.secondary, background: '#fff' }}>
+          style={{ padding: '8px 12px', border: `1px solid ${C.inputBorder}`, borderRadius: C.radiusSm, fontSize: 13, color: C.secondary, background: C.glassStrong }}>
           {deptOpts.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
         </select>
-      </div>
+      </FilterBar>
 
-      <div style={{ background: '#fff', border: `1px solid ${C.border}`, borderRadius: 10, overflow: 'hidden' }}>
+      <Surface>
         {loading ? <Spinner /> : data.length === 0 ? <EmptyState /> : (
           <div style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 1000 }}>
@@ -161,15 +162,15 @@ const LimitsPage: React.FC = () => {
             <div style={{ display: 'flex', gap: 4 }}>
               {Array.from({ length: Math.min(totalPages, 10) }, (_, i) => (
                 <button key={i} onClick={() => setPage(i + 1)} style={{
-                  padding: '4px 10px', borderRadius: 4, border: `1px solid ${C.inputBorder}`,
-                  background: page === i + 1 ? C.accent : '#fff', color: page === i + 1 ? '#fff' : C.text,
+                  padding: '4px 10px', borderRadius: C.radiusSm, border: `1px solid ${C.inputBorder}`,
+                  background: page === i + 1 ? `linear-gradient(135deg, ${C.accent}, #0EA5E9)` : C.glassStrong, color: page === i + 1 ? '#fff' : C.text,
                   cursor: 'pointer', fontSize: 12,
                 }}>{i + 1}</button>
               ))}
             </div>
           </div>
         )}
-      </div>
+      </Surface>
 
       <Modal open={modalOpen} onClose={() => setModalOpen(false)} title={editItem ? t('common.edit') : t('common.add')}
         footer={<>
@@ -177,7 +178,7 @@ const LimitsPage: React.FC = () => {
           <Btn onClick={handleSave} loading={saving}>{t('common.save')}</Btn>
         </>}
       >
-        {errorMsg && <div style={{ background: C.dangerBg, color: C.danger, padding: '8px 12px', borderRadius: 6, fontSize: 12, marginBottom: 14 }}>{errorMsg}</div>}
+        {errorMsg && <div style={{ background: C.dangerBg, color: C.danger, padding: '8px 12px', borderRadius: C.radiusSm, fontSize: 12, marginBottom: 14 }}>{errorMsg}</div>}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
           <SelectField label={t('references.limits.assetType') + ' *'} value={fAssetType} onChange={(e) => setFAssetType(e.target.value)}
             options={[{ value: 'TMZ', label: 'ТМЗ' }, { value: 'OS', label: 'ОС' }, { value: 'NMA', label: 'НМА' }]} />

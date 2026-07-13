@@ -132,7 +132,7 @@ USE_I18N = True
 USE_L10N = True
 USE_TZ = True
 
-TIME_ZONE = 'Asia/Almaty'
+TIME_ZONE = os.getenv('TIME_ZONE', 'Asia/Qyzylorda')
 
 LOCALE_PATHS = [
     BASE_DIR / 'locale',

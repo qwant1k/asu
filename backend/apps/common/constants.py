@@ -85,6 +85,7 @@ MOVEMENT_TYPE_CHOICES = [
 
 # --- Статусы заявок ---
 REQUEST_DRAFT = 'DRAFT'
+REQUEST_SENT_FOR_REVISION = 'SENT_FOR_REVISION'
 REQUEST_PENDING_SUPERVISOR = 'PENDING_SUPERVISOR'
 REQUEST_APPROVED_SUPERVISOR = 'APPROVED_SUPERVISOR'
 REQUEST_APPROVED_MOL = 'APPROVED_MOL'
@@ -96,25 +97,30 @@ REQUEST_CANCELLED = 'CANCELLED'
 
 REQUEST_STATUS_CHOICES = [
     (REQUEST_DRAFT, _('Черновик')),
+    (REQUEST_SENT_FOR_REVISION, _('На корректировке')),
     (REQUEST_PENDING_SUPERVISOR, _('На согласовании у руководителя')),
     (REQUEST_APPROVED_SUPERVISOR, _('Согласована руководителем')),
     (REQUEST_APPROVED_MOL, _('Согласована МОЛ')),
     (REQUEST_APPROVED_AHS_HEAD, _('Утверждена руководителем АХС')),
-    (REQUEST_APPROVED, _('Утверждена')),
-    (REQUEST_EXECUTED, _('Исполнена')),
+    (REQUEST_APPROVED, _('Согласована')),
+    (REQUEST_EXECUTED, _('Выдана')),
     (REQUEST_REJECTED, _('Отклонена')),
     (REQUEST_CANCELLED, _('Отменена')),
 ]
 
 # --- Действия согласования ---
+APPROVAL_SUBMITTED = 'SUBMITTED'
 APPROVAL_APPROVED = 'APPROVED'
 APPROVAL_REJECTED = 'REJECTED'
 APPROVAL_SENT_TO_REVISION = 'SENT_TO_REVISION'
+APPROVAL_WITHDRAWN = 'WITHDRAWN'
 
 APPROVAL_ACTION_CHOICES = [
+    (APPROVAL_SUBMITTED, _('Отправлено на согласование')),
     (APPROVAL_APPROVED, _('Согласовано')),
     (APPROVAL_REJECTED, _('Отклонено')),
     (APPROVAL_SENT_TO_REVISION, _('Отправлено на доработку')),
+    (APPROVAL_WITHDRAWN, _('Отозвано инициатором')),
 ]
 
 # --- Статусы документов ---
@@ -149,6 +155,8 @@ WRITE_OFF_TYPE_CHOICES = [
 
 # --- Типы уведомлений ---
 NOTIFICATION_REQUEST_STATUS = 'REQUEST_STATUS'
+NOTIFICATION_REQUEST_TO_APPROVE = 'REQUEST_TO_APPROVE'
+NOTIFICATION_REQUEST_TO_ISSUE = 'REQUEST_TO_ISSUE'
 NOTIFICATION_DOCUMENT_TO_SIGN = 'DOCUMENT_TO_SIGN'
 NOTIFICATION_OVERDUE_TASK = 'OVERDUE_TASK'
 NOTIFICATION_ASSET_EXPIRY = 'ASSET_EXPIRY'
@@ -156,6 +164,8 @@ NOTIFICATION_REMINDER = 'REMINDER'
 
 NOTIFICATION_TYPE_CHOICES = [
     (NOTIFICATION_REQUEST_STATUS, _('Изменение статуса заявки')),
+    (NOTIFICATION_REQUEST_TO_APPROVE, _('Заявка на согласование')),
+    (NOTIFICATION_REQUEST_TO_ISSUE, _('Заявка на выдачу')),
     (NOTIFICATION_DOCUMENT_TO_SIGN, _('Документ на подписание')),
     (NOTIFICATION_OVERDUE_TASK, _('Просроченная задача')),
     (NOTIFICATION_ASSET_EXPIRY, _('Истечение срока актива')),
@@ -170,7 +180,3 @@ EMAIL_STATUS_CHOICES = [
     (EMAIL_SENT, _('Отправлено')),
     (EMAIL_FAILED, _('Ошибка отправки')),
 ]
-
-# --- OTP ---
-OTP_EXPIRY_MINUTES = 30
-OTP_CODE_LENGTH = 6

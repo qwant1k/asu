@@ -9,6 +9,7 @@ from apps.common.constants import (
     APPROVAL_ACTION_CHOICES,
     REQUEST_DRAFT,
     REQUEST_STATUS_CHOICES,
+    ROLE_CHOICES,
 )
 from apps.common.mixins import TimestampMixin
 
@@ -55,6 +56,12 @@ class AssetRequest(TimestampMixin):
     )
     reason = models.TextField(
         _('Причина / обоснование'), blank=True, default='',
+    )
+    issue_responsibles = models.ManyToManyField(
+        settings.AUTH_USER_MODEL,
+        blank=True,
+        related_name='issue_responsible_requests',
+        verbose_name=_('Ответственные за выдачу'),
     )
 
     class Meta:
@@ -158,12 +165,6 @@ class RequestApproval(models.Model):
     action = models.CharField(
         _('Действие'), max_length=20, choices=APPROVAL_ACTION_CHOICES,
     )
-    otp_code = models.CharField(
-        _('Хэш OTP-кода'), max_length=64, blank=True, default='',
-    )
-    otp_expires_at = models.DateTimeField(
-        _('OTP действует до'), null=True, blank=True,
-    )
     signed_at = models.DateTimeField(
         _('Подписано'), null=True, blank=True,
     )
@@ -182,3 +183,35 @@ class RequestApproval(models.Model):
             f'{self.approver.get_short_name()} — '
             f'{self.get_action_display()}'
         )
+
+
+class ApprovalStep(models.Model):
+    """Настраиваемый этап иерархического согласования вида заявки."""
+
+    request_type = models.ForeignKey(
+        'references.RequestType',
+        on_delete=models.CASCADE,
+        related_name='approval_steps',
+        verbose_name=_('Вид заявки'),
+    )
+    order = models.PositiveIntegerField(_('Порядок'), default=1)
+    approver_role = models.CharField(
+        _('Роль согласующего'), max_length=30, choices=ROLE_CHOICES,
+    )
+    title = models.CharField(
+        _('Наименование этапа'), max_length=255, blank=True, default='',
+    )
+    requires_supervisor = models.BooleanField(
+        _('Только непосредственный руководитель инициатора'), default=False,
+        help_text=_('Актуально для роли «Руководитель подразделения»'),
+    )
+    is_active = models.BooleanField(_('Активен'), default=True)
+
+    class Meta:
+        verbose_name = _('Этап согласования')
+        verbose_name_plural = _('Этапы согласования')
+        ordering = ['request_type', 'order']
+        unique_together = [('request_type', 'order')]
+
+    def __str__(self):
+        return f'{self.request_type_id}: #{self.order} {self.get_approver_role_display()}'

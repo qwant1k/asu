@@ -133,11 +133,11 @@ class StockService:
         quantity = Decimal(str(quantity))
 
         # Обновляем закрепление у отправителя
-        assignments = AssetAssignment.objects.filter(
+        assignments = AssetAssignment.objects.select_for_update().filter(
             asset=asset,
             user=from_user,
             status=ASSIGNMENT_ACTIVE,
-        )
+        ).order_by('assigned_at')
         if not assignments.exists():
             raise ValueError(
                 _('У сотрудника %(user)s нет закреплённого актива %(asset)s') % {
@@ -147,8 +147,21 @@ class StockService:
             )
 
         assignment = assignments.first()
-        assignment.status = ASSIGNMENT_TRANSFERRED
-        assignment.save(update_fields=['status'])
+        if assignment.quantity < quantity:
+            raise ValueError(
+                _('Недостаточно закрепленного количества. '
+                  'Доступно: %(available)s, запрошено: %(requested)s') % {
+                    'available': assignment.quantity,
+                    'requested': quantity,
+                }
+            )
+
+        if assignment.quantity == quantity:
+            assignment.status = ASSIGNMENT_TRANSFERRED
+            assignment.save(update_fields=['status'])
+        else:
+            assignment.quantity -= quantity
+            assignment.save(update_fields=['quantity'])
 
         # Создаём новое закрепление у получателя
         AssetAssignment.objects.create(

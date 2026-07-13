@@ -1,17 +1,25 @@
 ﻿from django.db.models import Case, Count, DecimalField, F, Sum, Value, When
 from django.db.models.functions import Coalesce
 from rest_framework import viewsets
+from rest_framework.decorators import action
+from rest_framework.response import Response
 
 from apps.common.permissions import ReadOnlyOrAHSStaff
 
+from apps.requests.models import ApprovalStep
+
 from .filters import AssetFilter, CounterpartyFilter, LimitNormFilter
-from .models import Asset, AssetCategory, Counterparty, LimitNorm, RequestType
+from .models import Asset, AssetCategory, Counterparty, LimitNorm, Position, RequestType, UnitOfMeasure, Warehouse
 from .serializers import (
+    ApprovalStepSerializer,
     AssetCategorySerializer,
     AssetSerializer,
     CounterpartySerializer,
     LimitNormSerializer,
+    PositionSerializer,
     RequestTypeSerializer,
+    UnitOfMeasureSerializer,
+    WarehouseSerializer,
 )
 
 
@@ -39,12 +47,21 @@ class LimitNormViewSet(viewsets.ModelViewSet):
 
 
 class RequestTypeViewSet(viewsets.ModelViewSet):
-    queryset = RequestType.objects.all()
+    queryset = RequestType.objects.prefetch_related('approval_steps').all()
     serializer_class = RequestTypeSerializer
     permission_classes = [ReadOnlyOrAHSStaff]
     filterset_fields = ['asset_type', 'is_active', 'requires_long_term_use']
     search_fields = ['name', 'code']
     ordering = ['name']
+
+
+class ApprovalStepViewSet(viewsets.ModelViewSet):
+    """CRUD настраиваемых этапов согласования."""
+    queryset = ApprovalStep.objects.select_related('request_type').all()
+    serializer_class = ApprovalStepSerializer
+    permission_classes = [ReadOnlyOrAHSStaff]
+    filterset_fields = ['request_type', 'approver_role', 'is_active']
+    ordering = ['request_type', 'order']
 
 
 class AssetCategoryViewSet(viewsets.ModelViewSet):
@@ -90,3 +107,54 @@ class AssetViewSet(viewsets.ModelViewSet):
                 output_field=DecimalField(),
             ),
         )
+
+    @action(detail=True, methods=['get'])
+    def card(self, request, pk=None):
+        """Полная карточка позиции: реквизиты + движения + закрепления."""
+        from apps.assets.models import AssetAssignment, StockMovement
+        from apps.assets.serializers import (
+            AssetAssignmentSerializer,
+            StockMovementSerializer,
+        )
+        from apps.common.constants import ASSIGNMENT_WRITTEN_OFF
+
+        asset = self.get_object()
+        movements = StockMovement.objects.select_related(
+            'from_user', 'to_user', 'performed_by',
+        ).filter(asset=asset)[:25]
+        assignments = AssetAssignment.objects.select_related(
+            'user', 'assigned_by', 'user__department',
+        ).filter(asset=asset).exclude(status=ASSIGNMENT_WRITTEN_OFF)
+
+        data = self.get_serializer(asset).data
+        data['movements'] = StockMovementSerializer(movements, many=True).data
+        data['assignments'] = AssetAssignmentSerializer(assignments, many=True).data
+        return Response(data)
+
+
+class UnitOfMeasureViewSet(viewsets.ModelViewSet):
+    queryset = UnitOfMeasure.objects.all()
+    serializer_class = UnitOfMeasureSerializer
+    permission_classes = [ReadOnlyOrAHSStaff]
+    search_fields = ['name', 'code']
+    ordering_fields = ['name', 'code']
+    ordering = ['name']
+
+
+class WarehouseViewSet(viewsets.ModelViewSet):
+    queryset = Warehouse.objects.select_related('department').all()
+    serializer_class = WarehouseSerializer
+    permission_classes = [ReadOnlyOrAHSStaff]
+    search_fields = ['name', 'code', 'address']
+    filterset_fields = ['department', 'is_active']
+    ordering_fields = ['name', 'code']
+    ordering = ['name']
+
+
+class PositionViewSet(viewsets.ModelViewSet):
+    queryset = Position.objects.all()
+    serializer_class = PositionSerializer
+    permission_classes = [ReadOnlyOrAHSStaff]
+    search_fields = ['name', 'code']
+    ordering_fields = ['name', 'code']
+    ordering = ['name']

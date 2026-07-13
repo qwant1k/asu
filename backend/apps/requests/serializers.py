@@ -1,8 +1,35 @@
 ﻿"""Сериализаторы заявок ИС «АСУ»."""
 
+from django.utils.translation import gettext_lazy as _
 from rest_framework import serializers
 
+from apps.references.codegen import base_asset_type
+
 from .models import AssetRequest, AssetRequestItem, RequestApproval
+from .services import RequestWorkflowService
+
+
+class PendingMyApprovalMixin(serializers.Serializer):
+    """Добавляет вычисляемый признак: ожидает согласования текущим пользователем."""
+
+    pending_my_approval = serializers.SerializerMethodField()
+    pending_my_issue = serializers.SerializerMethodField()
+    required_approver_role = serializers.SerializerMethodField()
+
+    def get_pending_my_approval(self, obj):
+        request = self.context.get('request')
+        if not request or not getattr(request.user, 'is_authenticated', False):
+            return False
+        return RequestWorkflowService.can_approve(obj, request.user)
+
+    def get_pending_my_issue(self, obj):
+        request = self.context.get('request')
+        if not request or not getattr(request.user, 'is_authenticated', False):
+            return False
+        return RequestWorkflowService.can_issue(obj, request.user)
+
+    def get_required_approver_role(self, obj):
+        return RequestWorkflowService.get_required_approver_role(obj)
 
 
 class AssetRequestItemSerializer(serializers.ModelSerializer):
@@ -71,29 +98,40 @@ class RequestApprovalSerializer(serializers.ModelSerializer):
         ]
 
 
-class AssetRequestListSerializer(serializers.ModelSerializer):
+class AssetRequestListSerializer(PendingMyApprovalMixin, serializers.ModelSerializer):
     """Сериализатор списка заявок (краткий)."""
 
     initiator_name = serializers.CharField(source='initiator.get_full_name', read_only=True)
     request_type_name = serializers.CharField(source='request_type.name', read_only=True)
+    request_type_asset_type = serializers.CharField(source='request_type.asset_type', read_only=True)
     status_display = serializers.CharField(source='get_status_display', read_only=True)
+    issue_responsibles = serializers.PrimaryKeyRelatedField(many=True, read_only=True)
+    issue_responsible_names = serializers.SerializerMethodField()
+
+    def get_issue_responsible_names(self, obj):
+        return [
+            user.get_short_name() or user.username
+            for user in obj.issue_responsibles.all()
+        ]
 
     class Meta:
         model = AssetRequest
         fields = [
-            'id', 'number', 'request_type', 'request_type_name',
+            'id', 'number', 'request_type', 'request_type_name', 'request_type_asset_type',
             'status', 'status_display', 'initiator', 'initiator_name',
-            'created_at', 'updated_at',
+            'pending_my_approval', 'pending_my_issue', 'required_approver_role',
+            'issue_responsibles', 'issue_responsible_names', 'created_at', 'updated_at',
         ]
 
 
-class AssetRequestDetailSerializer(serializers.ModelSerializer):
+class AssetRequestDetailSerializer(PendingMyApprovalMixin, serializers.ModelSerializer):
     """Сериализатор детальной карточки заявки."""
 
     items = AssetRequestItemSerializer(many=True, read_only=True)
     approvals = RequestApprovalSerializer(many=True, read_only=True)
     initiator_name = serializers.CharField(source='initiator.get_full_name', read_only=True)
     request_type_name = serializers.CharField(source='request_type.name', read_only=True)
+    request_type_asset_type = serializers.CharField(source='request_type.asset_type', read_only=True)
     status_display = serializers.CharField(source='get_status_display', read_only=True)
     from_user_name = serializers.CharField(
         source='from_user.get_full_name', read_only=True, default='',
@@ -101,16 +139,26 @@ class AssetRequestDetailSerializer(serializers.ModelSerializer):
     to_user_name = serializers.CharField(
         source='to_user.get_full_name', read_only=True, default='',
     )
+    issue_responsibles = serializers.PrimaryKeyRelatedField(many=True, read_only=True)
+    issue_responsible_names = serializers.SerializerMethodField()
+
+    def get_issue_responsible_names(self, obj):
+        return [
+            user.get_short_name() or user.username
+            for user in obj.issue_responsibles.all()
+        ]
 
     class Meta:
         model = AssetRequest
         fields = [
-            'id', 'number', 'request_type', 'request_type_name',
+            'id', 'number', 'request_type', 'request_type_name', 'request_type_asset_type',
             'status', 'status_display',
             'initiator', 'initiator_name',
             'from_user', 'from_user_name',
             'to_user', 'to_user_name',
             'reason', 'items', 'approvals',
+            'issue_responsibles', 'issue_responsible_names',
+            'pending_my_approval', 'pending_my_issue', 'required_approver_role',
             'created_at', 'updated_at',
         ]
 
@@ -126,6 +174,35 @@ class AssetRequestCreateSerializer(serializers.ModelSerializer):
             'id', 'request_type', 'from_user', 'to_user',
             'reason', 'items',
         ]
+
+    def validate(self, attrs):
+        request_type = attrs.get('request_type') or (self.instance and self.instance.request_type)
+        items = attrs.get('items')
+        if not request_type or items is None:
+            return attrs
+
+        expected_type = base_asset_type(request_type.asset_type)
+        for idx, item in enumerate(items, start=1):
+            group = item.get('requested_group')
+            asset = item.get('asset')
+            if not group and not asset:
+                raise serializers.ValidationError({
+                    'items': _(f'Строка {idx}: необходимо указать группу или конкретную позицию.'),
+                })
+            if group and group.asset_type != expected_type:
+                raise serializers.ValidationError({
+                    'items': _(f'Строка {idx}: группа не соответствует типу заявки.'),
+                })
+            if asset and base_asset_type(asset.asset_type) != expected_type:
+                raise serializers.ValidationError({
+                    'items': _(f'Строка {idx}: позиция не соответствует типу заявки.'),
+                })
+            if group and asset and asset.group_id and asset.group_id != group.id:
+                raise serializers.ValidationError({
+                    'items': _(f'Строка {idx}: позиция не входит в выбранную группу.'),
+                })
+
+        return attrs
 
     def create(self, validated_data):
         items_data = validated_data.pop('items')

@@ -1,20 +1,25 @@
 """Views интеграции с 1С ИС «АСУ»."""
 
 from rest_framework import status
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import BasePermission
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from django.utils.translation import gettext_lazy as _
 
-from apps.common.permissions import IsAdmin
+from apps.users.access import has_access
 
 from .models import SyncLog
 from .tasks import sync_assets_from_1c_task
 
 
+class CanSyncIntegrations(BasePermission):
+    def has_permission(self, request, view):
+        return bool(request.user and request.user.is_authenticated and has_access(request.user, 'integrations.sync'))
+
+
 class SyncTriggerView(APIView):
     """Ручной запуск синхронизации с 1С (только ADMIN)."""
-    permission_classes = [IsAdmin]
+    permission_classes = [CanSyncIntegrations]
 
     def post(self, request):
         asset_type = request.data.get('asset_type', 'all')
@@ -27,7 +32,7 @@ class SyncTriggerView(APIView):
 
 class SyncStatusView(APIView):
     """Статус последней синхронизации с 1С."""
-    permission_classes = [IsAuthenticated]
+    permission_classes = [CanSyncIntegrations]
 
     def get(self, request):
         last_sync = SyncLog.objects.first()

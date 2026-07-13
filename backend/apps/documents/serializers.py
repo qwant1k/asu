@@ -168,10 +168,11 @@ class WriteOffActCreateSerializer(serializers.ModelSerializer):
 
 class PetitionItemSerializer(serializers.ModelSerializer):
     asset_name = serializers.CharField(source='asset.name', read_only=True)
+    asset_code = serializers.CharField(source='asset.code', read_only=True)
 
     class Meta:
         model = PetitionItem
-        fields = ['id', 'asset', 'asset_name', 'quantity', 'unit_price', 'total']
+        fields = ['id', 'asset', 'asset_name', 'asset_code', 'quantity', 'unit_price', 'total']
         read_only_fields = ['total']
 
 
@@ -203,10 +204,11 @@ class PetitionDetailSerializer(serializers.ModelSerializer):
 
 class ProtocolItemSerializer(serializers.ModelSerializer):
     asset_name = serializers.CharField(source='asset.name', read_only=True)
+    asset_code = serializers.CharField(source='asset.code', read_only=True)
 
     class Meta:
         model = ProtocolItem
-        fields = ['id', 'asset', 'asset_name', 'quantity', 'unit_price', 'total']
+        fields = ['id', 'asset', 'asset_name', 'asset_code', 'quantity', 'unit_price', 'total']
         read_only_fields = ['total']
 
 
@@ -240,10 +242,11 @@ class ProtocolDetailSerializer(serializers.ModelSerializer):
 
 class InternalTransferItemSerializer(serializers.ModelSerializer):
     asset_name = serializers.CharField(source='asset.name', read_only=True)
+    asset_code = serializers.CharField(source='asset.code', read_only=True)
 
     class Meta:
         model = InternalTransferItem
-        fields = ['id', 'asset', 'asset_name', 'quantity']
+        fields = ['id', 'asset', 'asset_name', 'asset_code', 'quantity']
 
 
 class InternalTransferListSerializer(serializers.ModelSerializer):

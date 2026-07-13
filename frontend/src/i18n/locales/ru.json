@@ -66,7 +66,9 @@
     "allDepartments": "Все подразделения",
     "allRoles": "Все роли",
     "allTypes": "Все типы",
-    "allPeriods": "Все периоды"
+    "allPeriods": "Все периоды",
+    "tmz": "ТМЗ",
+    "os": "ОС"
   },
   "auth": {
     "login": "Войти",
@@ -87,6 +89,9 @@
     "counterparties": "Контрагенты",
     "limits": "Лимиты и нормативы",
     "requestTypes": "Виды заявок",
+    "unitsOfMeasure": "Единицы измерения",
+    "warehouses": "Склады",
+    "positions": "Должности",
     "assetCategories": "Категории активов",
     "assetsTmz": "Справочник ТМЗ",
     "assetsOs": "Справочник ОС",
@@ -106,18 +111,33 @@
     "sync1c": "Синхронизация 1С",
     "warehouse": "Склад",
     "stock": "Остатки на складе",
+    "uploadStock": "Загрузка из Excel",
     "movements": "Журнал движения",
     "assignments": "Закрепления"
   },
   "dashboard": {
     "title": "Главная панель",
-    "pendingApprovals": "Заявки на согласовании",
+    "pendingApprovals": "Ожидают согласования",
     "myRequests": "Мои заявки",
+    "myInProgress": "Мои заявки в работе",
+    "approvedReady": "Готово к получению",
     "stockSummary": "Остатки ТМЗ",
     "recentNotifications": "Уведомления",
+    "unreadNotifications": "Непрочитанные уведомления",
     "quickLinks": "Быстрые ссылки",
     "noApprovals": "Нет заявок на согласовании",
-    "welcome": "Добро пожаловать, {{name}}"
+    "welcome": "Добро пожаловать, {{name}}",
+    "subtitle": "Обзор ключевых показателей системы",
+    "stockValue": "Остатки склада, ₸",
+    "lowStock": "Позиции с низким остатком",
+    "noLowStock": "Все остатки в норме",
+    "recentIssues": "Последние выдачи со склада",
+    "noRecentIssues": "Выдач пока не было",
+    "myInventory": "Моя инвентарная карточка",
+    "myRecentRequests": "Мои последние заявки",
+    "approvalQueue": "Заявки, ожидающие согласования",
+    "viewAll": "Смотреть все →",
+    "itemsInCard": "активов закреплено"
   },
   "profile": {
     "title": "Личный кабинет",
@@ -198,6 +218,24 @@
     "departmentOrFund": "Подразделение / Весь Фонд",
     "wholeFund": "Весь Фонд"
   },
+  "warehouse": {
+    "uploadTitle": "Загрузка остатков из Excel",
+    "assetType": "Тип актива",
+    "balanceDate": "Дата остатка",
+    "excelFile": "Файл Excel",
+    "requiredColumns": "Обязательные столбцы",
+    "columnsHint": "Код, Наименование, Ед. изм., Количество. Опционально: Цена, Сумма, Категория, Место хранения.",
+    "uploadBtn": "Загрузить",
+    "uploadResult": "Результат загрузки",
+    "processedRows": "Обработано строк",
+    "createdAssets": "Создано активов",
+    "updatedAssets": "Обновлено активов",
+    "createdStock": "Создано записей остатков",
+    "updatedStock": "Обновлено записей остатков",
+    "uploadErrors": "Ошибки в строках",
+    "row": "Строка"
+  },
+
   "requests": {
     "title": "Заявки",
     "createNew": "Создать заявку",
@@ -227,15 +265,16 @@
     "reasonPlaceholder": "Укажите причину или обоснование",
     "quantityRequested": "Запрошено",
     "quantityIssued": "Выдано",
-    "requestOtp": "Запросить код",
+    "pendingMyApproval": "Ожидают моего действия",
     "status": {
       "DRAFT": "Черновик",
+      "SENT_FOR_REVISION": "На корректировке",
       "PENDING_SUPERVISOR": "На согласовании у руководителя",
       "APPROVED_SUPERVISOR": "Согласована руководителем",
       "APPROVED_MOL": "Согласована МОЛ",
       "APPROVED_AHS_HEAD": "Утверждена рук. АХС",
-      "APPROVED": "Утверждена",
-      "EXECUTED": "Исполнена",
+      "APPROVED": "Согласована",
+      "EXECUTED": "Выдана",
       "REJECTED": "Отклонена",
       "CANCELLED": "Отменена"
     },
@@ -274,15 +313,6 @@
       "SENT_FOR_REVISION": "На доработке",
       "CANCELLED": "Аннулирован"
     }
-  },
-  "otp": {
-    "title": "Подтверждение OTP-кодом",
-    "enterCode": "Введите 6-значный код",
-    "codeSent": "Код отправлен на вашу электронную почту",
-    "codeExpires": "Код действителен {{minutes}} мин.",
-    "requestNewCode": "Запросить новый код",
-    "invalidCode": "Неверный код",
-    "codeExpired": "Срок действия кода истёк"
   },
   "notifications": {
     "title": "Уведомления",

@@ -14,7 +14,11 @@
   supervisor: number | null;
   supervisor_name: string;
   is_active: boolean;
+  is_staff: boolean;
+  is_superuser: boolean;
+  effective_permissions: string[];
   date_joined: string;
+  last_login: string | null;
   full_name: string;
   short_name: string;
 }
@@ -35,6 +39,7 @@ export type AssetType = 'TMZ' | 'OS' | 'NMA' | 'REPRESENTATIVE_TMZ';
 
 export type RequestStatus =
   | 'DRAFT'
+  | 'SENT_FOR_REVISION'
   | 'PENDING_SUPERVISOR'
   | 'APPROVED_SUPERVISOR'
   | 'APPROVED_MOL'
@@ -104,11 +109,17 @@ export interface WarehouseStock {
   asset_code: string;
   asset_type: AssetType;
   asset_type_display: string;
+  category: number;
+  category_name: string;
+  group: number | null;
+  group_name: string;
   unit_of_measure: string;
   unit_price: string;
   quantity: string;
   total_amount: string;
+  balance_date: string | null;
   location: string;
+  updated_at: string;
 }
 
 export interface AssetRequest {
@@ -116,6 +127,7 @@ export interface AssetRequest {
   number: string;
   request_type: number;
   request_type_name: string;
+  request_type_asset_type: AssetType;
   status: RequestStatus;
   status_display: string;
   initiator: number;
@@ -125,6 +137,11 @@ export interface AssetRequest {
   reason: string;
   items: AssetRequestItem[];
   approvals: RequestApproval[];
+  issue_responsibles: number[];
+  issue_responsible_names: string[];
+  pending_my_approval: boolean;
+  pending_my_issue: boolean;
+  required_approver_role: UserRole | null;
   created_at: string;
   updated_at: string;
 }
@@ -158,6 +175,59 @@ export interface RequestApproval {
   created_at: string;
 }
 
+export interface StockMovement {
+  id: number;
+  asset: number;
+  asset_name: string;
+  asset_code: string;
+  category: number;
+  category_name: string;
+  group: number | null;
+  group_name: string;
+  movement_type: string;
+  movement_type_display: string;
+  quantity: string;
+  unit_price: string | null;
+  total_amount: string | null;
+  from_user: number | null;
+  from_user_name: string;
+  to_user: number | null;
+  to_user_name: string;
+  performed_by: number | null;
+  performed_by_name: string;
+  performed_at: string;
+  comment: string;
+}
+
+export interface AssetAssignment {
+  id: number;
+  asset: number;
+  asset_name: string;
+  asset_code: string;
+  asset_type: AssetType;
+  asset_type_display: string;
+  inventory_number: string;
+  category: number;
+  category_name: string;
+  group: number | null;
+  group_name: string;
+  user: number;
+  user_name: string;
+  department_name: string;
+  quantity: string;
+  assigned_at: string;
+  assigned_by: number | null;
+  assigned_by_name: string;
+  location: string;
+  status: string;
+  status_display: string;
+}
+
+export interface AssetCard extends Asset {
+  movements: StockMovement[];
+  assignments: AssetAssignment[];
+}
+
 export interface Notification {
   id: number;
   notification_type: string;
@@ -166,6 +236,8 @@ export interface Notification {
   body: string;
   is_read: boolean;
   created_at: string;
+  related_model: string;
+  related_object_id: number | null;
 }
 
 export interface AssetCategory {
@@ -180,6 +252,17 @@ export interface AssetCategory {
   group_total_quantity: string;
 }
 
+export interface ApprovalStep {
+  id: number;
+  request_type: number;
+  order: number;
+  approver_role: UserRole;
+  approver_role_display: string;
+  title: string;
+  requires_supervisor: boolean;
+  is_active: boolean;
+}
+
 export interface RequestTypeReference {
   id: number;
   name: string;
@@ -189,6 +272,7 @@ export interface RequestTypeReference {
   requires_long_term_use: boolean;
   description: string;
   is_active: boolean;
+  approval_steps: ApprovalStep[];
 }
 
 export interface LimitNorm {
@@ -207,6 +291,36 @@ export interface LimitNorm {
   created_at: string;
 }
 
+export interface UnitOfMeasure {
+  id: number;
+  name: string;
+  code: string;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Warehouse {
+  id: number;
+  name: string;
+  code: string;
+  department: number | null;
+  department_name: string;
+  address: string;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Position {
+  id: number;
+  name: string;
+  code: string;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface PaginatedResponse<T> {
   count: number;
   next: string | null;
@@ -218,4 +332,54 @@ export interface AuthTokens {
   access: string;
   refresh: string;
   user: User;
+}
+
+export interface AccessPermissionDefinition {
+  code: string;
+  name: string;
+  category: string;
+  description: string;
+}
+
+export interface AccessDefinitionsResponse {
+  permissions: AccessPermissionDefinition[];
+  role_defaults: Record<UserRole, string[]>;
+}
+
+export interface PositionAccessRule {
+  id: number;
+  position: string;
+  normalized_position: string;
+  permission_code: string;
+  permission_name: string;
+  is_allowed: boolean;
+  is_active: boolean;
+  comment: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface UserAccessOverride {
+  id: number;
+  user: number;
+  user_name: string;
+  username: string;
+  permission_code: string;
+  permission_name: string;
+  mode: 'GRANT' | 'DENY';
+  comment: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface EffectiveAccessPermission extends AccessPermissionDefinition {
+  allowed: boolean;
+  source: 'none' | 'role' | 'position_allow' | 'position_deny' | 'user_grant' | 'user_deny';
+}
+
+export interface EffectiveUserAccess {
+  user: number;
+  position: string;
+  normalized_position: string;
+  permissions: EffectiveAccessPermission[];
 }

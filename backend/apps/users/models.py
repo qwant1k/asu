@@ -3,6 +3,7 @@ from django.db import models
 from django.utils.translation import gettext_lazy as _
 
 from apps.common.constants import ROLE_CHOICES, ROLE_USER
+from .access import ACCESS_PERMISSION_CHOICES, normalize_position
 
 
 class Department(models.Model):
@@ -85,3 +86,72 @@ class User(AbstractUser):
         if self.patronymic:
             parts.append(f'{self.patronymic[0]}.')
         return ' '.join(parts)
+
+
+class PositionAccessRule(models.Model):
+    """Permission rule applied to every user with the same position."""
+
+    position = models.CharField(_('Должность'), max_length=255)
+    normalized_position = models.CharField(_('Нормализованная должность'), max_length=255, db_index=True, editable=False)
+    permission_code = models.CharField(_('Право'), max_length=80, choices=ACCESS_PERMISSION_CHOICES)
+    is_allowed = models.BooleanField(_('Разрешено'), default=True)
+    is_active = models.BooleanField(_('Активно'), default=True)
+    comment = models.CharField(_('Комментарий'), max_length=255, blank=True, default='')
+    created_at = models.DateTimeField(_('Создано'), auto_now_add=True)
+    updated_at = models.DateTimeField(_('Обновлено'), auto_now=True)
+
+    class Meta:
+        verbose_name = _('Право по должности')
+        verbose_name_plural = _('Права по должностям')
+        ordering = ['position', 'permission_code']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['normalized_position', 'permission_code'],
+                name='unique_position_access_rule',
+            ),
+        ]
+
+    def save(self, *args, **kwargs):
+        self.normalized_position = normalize_position(self.position)
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        sign = '+' if self.is_allowed else '-'
+        return f'{self.position}: {sign}{self.permission_code}'
+
+
+class UserAccessOverride(models.Model):
+    """Personal permission grant or deny for one user."""
+
+    MODE_GRANT = 'GRANT'
+    MODE_DENY = 'DENY'
+    MODE_CHOICES = [
+        (MODE_GRANT, _('Разрешить')),
+        (MODE_DENY, _('Запретить')),
+    ]
+
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='access_overrides',
+        verbose_name=_('Пользователь'),
+    )
+    permission_code = models.CharField(_('Право'), max_length=80, choices=ACCESS_PERMISSION_CHOICES)
+    mode = models.CharField(_('Режим'), max_length=10, choices=MODE_CHOICES, default=MODE_GRANT)
+    comment = models.CharField(_('Комментарий'), max_length=255, blank=True, default='')
+    created_at = models.DateTimeField(_('Создано'), auto_now_add=True)
+    updated_at = models.DateTimeField(_('Обновлено'), auto_now=True)
+
+    class Meta:
+        verbose_name = _('Индивидуальное право')
+        verbose_name_plural = _('Индивидуальные права')
+        ordering = ['user__last_name', 'user__first_name', 'permission_code']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['user', 'permission_code'],
+                name='unique_user_access_override',
+            ),
+        ]
+
+    def __str__(self):
+        return f'{self.user}: {self.mode} {self.permission_code}'

@@ -22,12 +22,6 @@ MSG_TOKEN_INVALID = _("Недействительный токен")
 MSG_TOKEN_EXPIRED = _("Срок действия токена истёк")
 MSG_USER_INACTIVE = _("Учётная запись деактивирована")
 
-# --- OTP ---
-MSG_OTP_SENT = _("OTP-код отправлен на вашу электронную почту")
-MSG_OTP_INVALID = _("Неверный OTP-код")
-MSG_OTP_EXPIRED = _("Срок действия OTP-кода истёк")
-MSG_OTP_ALREADY_USED = _("OTP-код уже был использован")
-
 # --- Заявки ---
 MSG_REQUEST_CREATED = _("Заявка успешно создана")
 MSG_REQUEST_SUBMITTED = _("Заявка отправлена на согласование")

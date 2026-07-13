@@ -18,12 +18,12 @@ const Sync1CPage: React.FC = () => {
 
   const fetchStatus = async () => {
     setLoading(true);
-    try { const res = await api.get('/integrations/sync-status/'); setStatus(res.data); } catch { setStatus(null); } finally { setLoading(false); }
+    try { const res = await api.get('/integrations/one-c/sync-status/'); setStatus(res.data.last_sync); } catch { setStatus(null); } finally { setLoading(false); }
   };
 
   const triggerSync = async () => {
     setSyncing(true);
-    try { await api.post('/integrations/trigger-sync/'); setTimeout(fetchStatus, 3000); } catch { /* */ } finally { setSyncing(false); }
+    try { await api.post('/integrations/one-c/sync/'); setTimeout(fetchStatus, 3000); } catch { /* */ } finally { setSyncing(false); }
   };
 
   useEffect(() => { fetchStatus(); }, []);
@@ -45,7 +45,7 @@ const Sync1CPage: React.FC = () => {
             </DescRow>
             <DescRow label={t('admin.syncStartedAt')}>{status.started_at ? new Date(status.started_at).toLocaleString('ru-KZ') : '—'}</DescRow>
             <DescRow label={t('admin.syncFinishedAt')}>{status.finished_at ? new Date(status.finished_at).toLocaleString('ru-KZ') : '—'}</DescRow>
-            <DescRow label={t('admin.syncRecordsProcessed')}>{status.records_processed ?? '—'}</DescRow>
+            <DescRow label={t('admin.syncRecordsProcessed')}>{Number(status.created_count || 0) + Number(status.updated_count || 0)}</DescRow>
             {status.error_message && (
               <DescRow label={t('admin.syncError')}>
                 <span style={{ color: C.danger }}>{status.error_message}</span>
