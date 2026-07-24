@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import {
   CheckOutlined,
   CloseOutlined,
+  DeleteOutlined,
   EditOutlined,
   LeftOutlined,
   RollbackOutlined,
@@ -20,6 +21,31 @@ import {
 
 interface IssueDraftRow { id: number; issued_asset: number | null; quantity_issued: number; }
 type ApprovalAction = 'approve' | 'reject' | 'revision';
+type SimpleAction = 'withdraw' | 'cancel' | 'delete';
+
+const parseDateValue = (value?: string | null) => {
+  if (!value) return null;
+  const text = String(value).trim();
+  const localMatch = text.match(/^(\d{2})\.(\d{2})\.(\d{4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?$/);
+  if (localMatch) {
+    const [, day, month, year, hour = '0', minute = '0', second = '0'] = localMatch;
+    return new Date(Number(year), Number(month) - 1, Number(day), Number(hour), Number(minute), Number(second));
+  }
+  const date = new Date(text);
+  return Number.isNaN(date.getTime()) ? null : date;
+};
+
+const formatDateTime = (value?: string | null) => {
+  const date = parseDateValue(value);
+  if (!date) return '—';
+  return date.toLocaleString('ru-RU', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+};
 
 const DescRow = ({ label, children }: { label: string; children: React.ReactNode }) => (
   <div style={{ display: 'flex', gap: 12, padding: '8px 0', borderBottom: `1px solid ${C.rowBorder}` }}>
@@ -37,7 +63,7 @@ const RequestDetailPage: React.FC = () => {
   const [request, setRequest] = useState<AssetRequest | null>(null);
   const [loading, setLoading] = useState(true);
   const [approvalAction, setApprovalAction] = useState<ApprovalAction | null>(null);
-  const [simpleAction, setSimpleAction] = useState<'withdraw' | 'cancel' | null>(null);
+  const [simpleAction, setSimpleAction] = useState<SimpleAction | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionComment, setActionComment] = useState('');
@@ -48,6 +74,7 @@ const RequestDetailPage: React.FC = () => {
 
   const canIssue = !!request?.pending_my_issue;
   const userPermissions = user?.effective_permissions || [];
+  const isAdmin = user?.role === 'ADMIN' || user?.is_superuser || userPermissions.includes('system.admin');
   const isAhsIssueApprovalStep = request?.required_approver_role === 'AHS_HEAD'
     && (user?.role === 'AHS_HEAD' || user?.role === 'ADMIN' || userPermissions.includes('requests.approve_ahs'));
 
@@ -152,6 +179,11 @@ const RequestDetailPage: React.FC = () => {
     setActionError(null);
     setActionLoading(true);
     try {
+      if (simpleAction === 'delete') {
+        await api.delete(`/requests/${id}/`);
+        navigate('/requests');
+        return;
+      }
       await api.post(`/requests/${id}/${simpleAction}/`);
       setSimpleAction(null);
       fetchRequest();
@@ -189,7 +221,8 @@ const RequestDetailPage: React.FC = () => {
   const canSubmit = isInitiator && (isDraft || isRevision);
   const canEdit = isInitiator && (isDraft || isRevision);
   const canWithdraw = isInitiator && request.status === 'PENDING_SUPERVISOR';
-  const canCancel = isInitiator && isDraft;
+  const canCancel = (isInitiator && isDraft) || (isAdmin && !['EXECUTED', 'CANCELLED'].includes(request.status));
+  const canDelete = isAdmin;
   const canApprove = request.pending_my_approval;
   const workflowSteps = [
     { label: 'Создана', done: true, active: isDraft || isRevision },
@@ -253,7 +286,7 @@ const RequestDetailPage: React.FC = () => {
       <Panel title={t('requests.requestType')} style={{ marginBottom: 16 }}>
         <DescRow label={t('requests.requestType')}>{request.request_type_name}</DescRow>
         <DescRow label={t('requests.initiator')}>{request.initiator_name}</DescRow>
-        <DescRow label={t('common.date')}>{new Date(request.created_at).toLocaleString('ru-KZ')}</DescRow>
+        <DescRow label={t('common.date')}>{formatDateTime(request.created_at)}</DescRow>
         <DescRow label={t('common.status')}><Badge status={request.status} /></DescRow>
         {request.issue_responsible_names?.length > 0 && (
           <DescRow label="Ответственные за выдачу">{request.issue_responsible_names.join(', ')}</DescRow>
@@ -353,7 +386,7 @@ const RequestDetailPage: React.FC = () => {
                 <div>
                   <div style={{ fontSize: 13 }}><strong>{approval.approver_name}</strong> — {approval.action_display}</div>
                   {approval.comment && <div style={{ fontSize: 12, color: C.secondary }}>{approval.comment}</div>}
-                  {approval.signed_at && <div style={{ fontSize: 11, color: C.muted }}>{new Date(approval.signed_at).toLocaleString('ru-KZ')}</div>}
+                  {approval.signed_at && <div style={{ fontSize: 11, color: C.muted }}>{formatDateTime(approval.signed_at)}</div>}
                 </div>
               </div>
             ))}
@@ -366,6 +399,7 @@ const RequestDetailPage: React.FC = () => {
         {canSubmit && <Btn onClick={handleSubmit} loading={actionLoading}><SendOutlined /> {isRevision ? 'Повторно отправить' : t('requests.submit')}</Btn>}
         {canWithdraw && <Btn variant="secondary" onClick={() => setSimpleAction('withdraw')}><RollbackOutlined /> Отозвать</Btn>}
         {canCancel && <Btn variant="danger" onClick={() => setSimpleAction('cancel')}><StopOutlined /> Отменить заявку</Btn>}
+        {canDelete && <Btn variant="danger" onClick={() => setSimpleAction('delete')}><DeleteOutlined /> Удалить полностью</Btn>}
         {canApprove && (
           <>
             <Btn onClick={() => openApprovalAction('approve')}><CheckOutlined /> {t('requests.approve')}</Btn>
@@ -387,8 +421,14 @@ const RequestDetailPage: React.FC = () => {
         open={!!simpleAction}
         onClose={() => setSimpleAction(null)}
         onConfirm={handleSimpleAction}
-        title={simpleAction === 'withdraw' ? 'Отозвать отправку на согласование?' : 'Отменить заявку?'}
-        confirmText={simpleAction === 'withdraw' ? 'Отозвать' : 'Отменить'}
+        title={
+          simpleAction === 'withdraw'
+            ? 'Отозвать отправку на согласование?'
+            : simpleAction === 'delete'
+              ? 'Удалить заявку полностью?'
+              : 'Отменить заявку?'
+        }
+        confirmText={simpleAction === 'withdraw' ? 'Отозвать' : simpleAction === 'delete' ? 'Удалить' : 'Отменить'}
       />
 
       <Modal

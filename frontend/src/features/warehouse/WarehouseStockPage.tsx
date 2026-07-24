@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import api from '../../api/axios';
 import { useAppSelector } from '../../app/hooks';
-import type { AssetCategory, WarehouseStock, PaginatedResponse } from '../../shared/types';
+import type { AssetCategory, Warehouse, WarehouseStock, PaginatedResponse } from '../../shared/types';
 import { C, PageHeader, Th, Td, Badge, Spinner, EmptyState, Btn, hoverRow, Surface } from '../../shared/ui/primitives';
 import AssetLink from '../../shared/components/AssetLink';
 
@@ -28,7 +28,9 @@ const WarehouseStockPage: React.FC = () => {
   const [assetType, setAssetType] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
   const [groupFilter, setGroupFilter] = useState('');
+  const [warehouseFilter, setWarehouseFilter] = useState('');
   const [categories, setCategories] = useState<AssetCategory[]>([]);
+  const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
 
   useEffect(() => {
     (async () => {
@@ -39,11 +41,12 @@ const WarehouseStockPage: React.FC = () => {
         if (assetType) params.asset_type = assetType;
         if (categoryFilter) params.category = categoryFilter;
         if (groupFilter) params.group = groupFilter;
+        if (warehouseFilter) params.warehouse = warehouseFilter;
         const res = await api.get<PaginatedResponse<WarehouseStock>>('/assets/warehouse-stock/', { params });
         setData(res.data.results); setTotal(res.data.count);
       } catch { setData([]); } finally { setLoading(false); }
     })();
-  }, [page, search, assetType, categoryFilter, groupFilter]);
+  }, [page, search, assetType, categoryFilter, groupFilter, warehouseFilter]);
 
   useEffect(() => {
     (async () => {
@@ -55,6 +58,17 @@ const WarehouseStockPage: React.FC = () => {
       } catch { setCategories([]); }
     })();
   }, [assetType]);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await api.get<PaginatedResponse<Warehouse>>('/references/warehouses/', {
+          params: { page_size: 500, is_active: true, ordering: 'name' },
+        });
+        setWarehouses(res.data.results || []);
+      } catch { setWarehouses([]); }
+    })();
+  }, []);
 
   const inputStyle: React.CSSProperties = {
     padding: '8px 14px',
@@ -82,6 +96,10 @@ const WarehouseStockPage: React.FC = () => {
             <option value="">Все группы</option>
             {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
           </select>
+          <select value={warehouseFilter} onChange={(e) => { setWarehouseFilter(e.target.value); setPage(1); }} style={{ ...inputStyle, width: 190 }}>
+            <option value="">Все склады</option>
+            {warehouses.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
+          </select>
           {canUpload && (
             <Btn variant="secondary" onClick={() => navigate('/warehouse/stock/upload')}>
               {t('common.importExcel')}
@@ -107,7 +125,7 @@ const WarehouseStockPage: React.FC = () => {
                       <Td><Badge status={r.asset_type_display} /></Td>
                       <Td muted>{r.unit_of_measure}</Td><Td muted>{r.group_name || '—'}</Td><Td right>{r.unit_price}</Td>
                       <Td right>{r.quantity}</Td><Td right>{r.total_amount}</Td>
-                      <Td muted>{r.location}</Td>
+                      <Td muted>{r.warehouse_name || r.location}</Td>
                     </tr>
                   ))
                 }

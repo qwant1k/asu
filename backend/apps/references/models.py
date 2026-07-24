@@ -1,5 +1,6 @@
 ﻿from django.conf import settings
 from django.db import models
+from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
 from apps.common.constants import (
@@ -28,6 +29,34 @@ class Counterparty(TimestampMixin):
 
     def __str__(self):
         return f'{self.name} ({self.bin})'
+
+
+class Contract(TimestampMixin):
+    """Signed contract attached to a counterparty."""
+
+    name = models.CharField(_('Наименование'), max_length=255)
+    contract_date = models.DateField(_('Дата договора'))
+    valid_until = models.DateField(_('Срок действия'))
+    counterparty = models.ForeignKey(
+        Counterparty,
+        on_delete=models.CASCADE,
+        related_name='contracts',
+        verbose_name=_('Контрагент'),
+    )
+    pdf_file = models.FileField(
+        _('PDF договора'),
+        upload_to='contracts/pdfs/',
+        blank=True,
+        null=True,
+    )
+
+    class Meta:
+        verbose_name = _('Договор')
+        verbose_name_plural = _('Договоры')
+        ordering = ['-contract_date', 'name']
+
+    def __str__(self):
+        return f'{self.name} - {self.counterparty.name}'
 
 
 class LimitNorm(TimestampMixin):
@@ -87,6 +116,14 @@ class RequestType(models.Model):
     def __str__(self):
         return self.name
 
+    def save(self, *args, **kwargs):
+        old_name = None
+        if self.pk:
+            old_name = type(self).objects.filter(pk=self.pk).values_list('name', flat=True).first()
+        super().save(*args, **kwargs)
+        if old_name is not None and old_name != self.name:
+            self.assets.update(unit_of_measure=self.name, updated_at=timezone.now())
+
 
 class AssetCategory(models.Model):
     """Asset group/category."""
@@ -111,6 +148,15 @@ class AssetCategory(models.Model):
     def __str__(self):
         return self.name
 
+    def save(self, *args, **kwargs):
+        old_name = None
+        if self.pk:
+            old_name = type(self).objects.filter(pk=self.pk).values_list('name', flat=True).first()
+        super().save(*args, **kwargs)
+        if old_name is not None and old_name != self.name:
+            self.stock_items.update(location=self.name, updated_at=timezone.now())
+            self.asset_assignments.update(location=self.name)
+
 
 class Asset(TimestampMixin):
     """Universal asset model for TMZ / OS / NMA."""
@@ -133,6 +179,14 @@ class Asset(TimestampMixin):
         verbose_name=_('Группа'),
     )
     unit_of_measure = models.CharField(_('Единица измерения'), max_length=50)
+    unit_of_measure_ref = models.ForeignKey(
+        'references.UnitOfMeasure',
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name='assets',
+        verbose_name=_('Единица измерения из справочника'),
+    )
     unit_price = models.DecimalField(_('Цена за единицу'), max_digits=15, decimal_places=2)
     is_long_term_use = models.BooleanField(_('ТМЗ длительного пользования'), default=False)
     inventory_number = models.CharField(_('Инвентарный номер'), max_length=100, blank=True, null=True)
@@ -150,6 +204,11 @@ class Asset(TimestampMixin):
     def __str__(self):
         return f'{self.name} ({self.code})'
 
+    def save(self, *args, **kwargs):
+        if self.unit_of_measure_ref_id:
+            self.unit_of_measure = self.unit_of_measure_ref.name
+        super().save(*args, **kwargs)
+
 
 class UnitOfMeasure(TimestampMixin):
     """Unit of measure reference."""
@@ -165,6 +224,14 @@ class UnitOfMeasure(TimestampMixin):
 
     def __str__(self):
         return self.name
+
+    def save(self, *args, **kwargs):
+        old_name = None
+        if self.pk:
+            old_name = type(self).objects.filter(pk=self.pk).values_list('name', flat=True).first()
+        super().save(*args, **kwargs)
+        if old_name is not None and old_name != self.name:
+            self.assets.update(unit_of_measure=self.name, updated_at=timezone.now())
 
 
 class Warehouse(TimestampMixin):
@@ -191,6 +258,15 @@ class Warehouse(TimestampMixin):
     def __str__(self):
         return self.name
 
+    def save(self, *args, **kwargs):
+        old_name = None
+        if self.pk:
+            old_name = type(self).objects.filter(pk=self.pk).values_list('name', flat=True).first()
+        super().save(*args, **kwargs)
+        if old_name is not None and old_name != self.name:
+            self.stock_items.update(location=self.name, updated_at=timezone.now())
+            self.asset_assignments.update(location=self.name)
+
 
 class Position(TimestampMixin):
     """Position / job title reference."""
@@ -206,3 +282,27 @@ class Position(TimestampMixin):
 
     def __str__(self):
         return self.name
+
+    def save(self, *args, **kwargs):
+        old_name = None
+        if self.pk:
+            old_name = type(self).objects.filter(pk=self.pk).values_list('name', flat=True).first()
+        super().save(*args, **kwargs)
+        if old_name is not None and old_name != self.name:
+            from apps.users.access import normalize_position
+            from apps.users.models import PositionAccessRule
+
+            self.users.update(position=self.name)
+            old_normalized = normalize_position(old_name)
+            new_normalized = normalize_position(self.name)
+            for rule in PositionAccessRule.objects.filter(normalized_position=old_normalized):
+                duplicate = PositionAccessRule.objects.filter(
+                    normalized_position=new_normalized,
+                    permission_code=rule.permission_code,
+                ).exclude(pk=rule.pk).first()
+                if duplicate:
+                    rule.delete()
+                else:
+                    rule.position = self.name
+                    rule.normalized_position = new_normalized
+                    rule.save(update_fields=['position', 'normalized_position', 'updated_at'])

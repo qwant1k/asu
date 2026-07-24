@@ -7,3 +7,6 @@ class AssetsConfig(AppConfig):
     default_auto_field = 'django.db.models.BigAutoField'
     name = 'apps.assets'
     verbose_name = _('Активы и склад')
+
+    def ready(self):
+        import apps.assets.signals  # noqa: F401

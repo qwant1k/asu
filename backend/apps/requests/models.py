@@ -63,6 +63,19 @@ class AssetRequest(TimestampMixin):
         related_name='issue_responsible_requests',
         verbose_name=_('Ответственные за выдачу'),
     )
+    deletion_requested_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='deletion_requested_requests',
+        verbose_name=_('Пометил на удаление'),
+    )
+    deletion_requested_at = models.DateTimeField(
+        _('Дата пометки на удаление'),
+        null=True,
+        blank=True,
+    )
 
     class Meta:
         verbose_name = _('Заявка')

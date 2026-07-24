@@ -86,6 +86,8 @@ const statusColors: Record<string, { bg: string; color: string }> = {
   COMMISSION_MEMBER: { bg: '#FEF7C3', color: '#A15C07' },
   IRD_WORKER: { bg: '#FDF2FA', color: '#C11574' },
   PENDING_SIGNATURE: { bg: C.infoBg, color: C.info },
+  PENDING_AHS_APPROVAL: { bg: C.infoBg, color: C.info },
+  PENDING_CHANGE_APPROVAL: { bg: C.warningBg, color: C.warning },
   PARTIALLY_SIGNED: { bg: C.warningBg, color: C.warning },
   SIGNED: { bg: C.successBg, color: C.success },
   ACTIVE: { bg: C.successBg, color: C.success },
@@ -117,6 +119,8 @@ const statusLabels: Record<string, string> = {
   CANCELLED: 'Отменена',
 
   PENDING_SIGNATURE: 'На подписании',
+  PENDING_AHS_APPROVAL: 'На согласовании АХС',
+  PENDING_CHANGE_APPROVAL: 'Запрошено изменение',
   PARTIALLY_SIGNED: 'Частично подписан',
   SIGNED: 'Подписан',
 

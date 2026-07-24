@@ -16,12 +16,14 @@ import {
   RightOutlined,
   SettingOutlined,
   UserOutlined,
+  WarningOutlined,
 } from '@ant-design/icons';
 import { useAppSelector, useAppDispatch } from '../../app/hooks';
 import { logoutThunk } from '../../features/auth/authSlice';
 import { C } from '../ui/primitives';
 import api from '../../api/axios';
-import type { Notification, PaginatedResponse } from '../types';
+import type { ActiveStockAlert, Notification, PaginatedResponse } from '../types';
+import { isManagerUser } from '../auth/access';
 
 interface NavItem {
   id: string;
@@ -57,29 +59,33 @@ const AppLayout: React.FC = () => {
   const [notificationsNext, setNotificationsNext] = useState<string | null>(null);
   const [notificationsLoading, setNotificationsLoading] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
+  const [stockAlerts, setStockAlerts] = useState<ActiveStockAlert[]>([]);
 
   const role = user?.role || 'USER';
   const permissions = user?.effective_permissions || [];
   const canAccess = useCallback((access?: string, fallbackRoles: string[] = []) => (
     role === 'ADMIN' || (access ? permissions.includes(access) : false) || fallbackRoles.includes(role)
   ), [permissions, role]);
+  const isManager = isManagerUser(user);
   const isAdmin = canAccess('system.admin', ['ADMIN'])
     || canAccess('users.manage')
     || canAccess('access.manage')
     || canAccess('integrations.sync');
-  const canManageDocuments = canAccess('documents.manage', ['ADMIN', 'AHS_WORKER', 'AHS_HEAD', 'MOL_WAREHOUSE', 'MOL_NMA']);
-  const isReportViewer = canAccess('reports.view', ['ADMIN', 'AHS_HEAD', 'AHS_WORKER', 'MOL_WAREHOUSE', 'MOL_NMA']);
+  const canManageDocuments = canAccess('documents.manage') || canAccess('requests.approve_ahs');
+  const isReportViewer = canAccess('reports.view');
 
   const nav: NavItem[] = useMemo(() => [
-    { id: 'dashboard', icon: <AppstoreOutlined />, label: t('nav.dashboard'), path: '/dashboard' },
+    ...(isManager ? [{ id: 'dashboard', icon: <AppstoreOutlined />, label: t('nav.dashboard'), path: '/dashboard' }] : []),
     { id: 'profile', icon: <UserOutlined />, label: t('nav.profile'), path: '/profile' },
-    {
+    ...(isManager ? [{
       id: 'references',
       icon: <BookOutlined />,
       label: t('nav.references'),
       children: [
         { path: '/references/counterparties', label: t('nav.counterparties') },
+        { path: '/references/contracts', label: t('nav.contracts') },
         { path: '/references/users', label: t('nav.users') },
+        { path: '/references/departments', label: t('nav.departments') },
         { path: '/references/limits', label: t('nav.limits') },
         { path: '/references/request-types', label: t('nav.requestTypes') },
         { path: '/references/units-of-measure', label: t('nav.unitsOfMeasure') },
@@ -89,18 +95,19 @@ const AppLayout: React.FC = () => {
         { path: '/references/assets/os', label: t('nav.assetsOs') },
         { path: '/references/assets/nma', label: t('nav.assetsNma') },
       ],
-    },
-    {
+    }] : []),
+    ...(isManager ? [{
       id: 'warehouse',
       icon: <InboxOutlined />,
       label: t('nav.warehouse'),
       children: [
         { path: '/warehouse/stock', label: t('nav.stock') },
-        { path: '/warehouse/stock/upload', label: t('nav.uploadStock'), roles: ['ADMIN', 'MOL_WAREHOUSE', 'MOL_NMA'] },
+        { path: '/warehouse/stock/upload', label: t('nav.uploadStock'), access: 'warehouse.upload' },
+        { path: '/warehouse/stock-alerts', label: 'Алармы остатков', access: 'warehouse.upload' },
         { path: '/warehouse/movements', label: t('nav.movements') },
         { path: '/warehouse/assignments', label: t('nav.assignments') },
       ],
-    },
+    }] : []),
     {
       id: 'requests',
       icon: <FormOutlined />,
@@ -122,7 +129,7 @@ const AppLayout: React.FC = () => {
         { path: '/documents/internal-transfers', label: t('nav.internalTransfers') },
       ],
     }] : []),
-    { id: 'inventory', icon: <AuditOutlined />, label: t('nav.inventory'), path: '/inventory' },
+    ...(isManager ? [{ id: 'inventory', icon: <AuditOutlined />, label: t('nav.inventory'), path: '/inventory' }] : []),
     ...(isReportViewer ? [{
       id: 'reports',
       icon: <BarChartOutlined />,
@@ -148,7 +155,7 @@ const AppLayout: React.FC = () => {
         { path: '/admin/sync-1c', label: t('nav.sync1c'), access: 'integrations.sync' },
       ],
     }] : []),
-  ], [canManageDocuments, isAdmin, isReportViewer, t]);
+  ], [canManageDocuments, isAdmin, isManager, isReportViewer, t]);
 
   const isActive = (item: NavItem) => {
     if (item.path) return location.pathname === item.path;
@@ -202,17 +209,29 @@ const AppLayout: React.FC = () => {
     }
   }, [user]);
 
+  const fetchStockAlerts = useCallback(async () => {
+    if (!user) return;
+    try {
+      const res = await api.get<ActiveStockAlert[]>('/assets/stock-alerts/active/');
+      setStockAlerts(res.data || []);
+    } catch {
+      setStockAlerts([]);
+    }
+  }, [user]);
+
   useEffect(() => {
     if (!user) return undefined;
     fetchNotifications(false);
     fetchUnreadCount();
+    fetchStockAlerts();
 
     const timer = window.setInterval(() => {
       fetchNotifications(false);
       fetchUnreadCount();
+      fetchStockAlerts();
     }, 60000);
     return () => window.clearInterval(timer);
-  }, [fetchNotifications, fetchUnreadCount, user]);
+  }, [fetchNotifications, fetchStockAlerts, fetchUnreadCount, user]);
 
   const markAllNotificationsRead = async () => {
     try {
@@ -225,6 +244,12 @@ const AppLayout: React.FC = () => {
   const getNotificationPath = (notification: Notification) => {
     if (!notification.related_object_id) return '';
     if (notification.related_model === 'assetrequest') return `/requests/${notification.related_object_id}`;
+    if (notification.related_model === 'warehousestock') return '/warehouse/stock';
+    if (notification.related_model === 'incominginvoice') return `/documents/incoming-invoices/${notification.related_object_id}`;
+    if (notification.related_model === 'writeoffact') return `/documents/write-off-acts/${notification.related_object_id}`;
+    if (notification.related_model === 'petition') return `/documents/petitions/${notification.related_object_id}`;
+    if (notification.related_model === 'commissionprotocol') return `/documents/protocols/${notification.related_object_id}`;
+    if (notification.related_model === 'internaltransferinvoice') return `/documents/internal-transfers/${notification.related_object_id}`;
     return '';
   };
 
@@ -251,7 +276,7 @@ const AppLayout: React.FC = () => {
       <aside
         className="app-sidebar-graphite"
         style={{
-          width: 264,
+          width: 304,
           background: 'linear-gradient(180deg, rgba(17, 24, 39, 0.98) 0%, rgba(31, 41, 55, 0.96) 58%, rgba(15, 23, 42, 0.98) 100%)',
           backdropFilter: 'blur(22px) saturate(1.35)',
           WebkitBackdropFilter: 'blur(22px) saturate(1.35)',
@@ -265,7 +290,7 @@ const AppLayout: React.FC = () => {
       >
         <div style={{ padding: '20px 18px 16px' }}>
           <button
-            onClick={() => navigate('/dashboard')}
+            onClick={() => navigate(isManager ? '/dashboard' : '/requests')}
             style={{
               ...navButtonBase,
               padding: 0,
@@ -294,8 +319,8 @@ const AppLayout: React.FC = () => {
           </button>
         </div>
 
-        <nav style={{ flex: 1, padding: '8px 10px 12px', overflowY: 'auto' }}>
-          <div style={{ fontSize: 11, color: C.muted, padding: '8px 10px', fontWeight: 700, letterSpacing: 0 }}>
+        <nav className="app-sidebar-nav" style={{ flex: 1, padding: '10px 14px 16px', overflowY: 'auto', minHeight: 0 }}>
+          <div style={{ fontSize: 11, color: C.muted, padding: '8px 10px 10px', fontWeight: 700, letterSpacing: 0 }}>
             Меню
           </div>
           {nav.map((n) => {
@@ -303,7 +328,7 @@ const AppLayout: React.FC = () => {
             const expanded = openGroup === n.id || (openGroup === null && activeGroupId === n.id);
             const iconColor = active ? C.accentCyan : '#94A3B8';
             return (
-              <div key={n.id} style={{ marginBottom: 3 }}>
+              <div key={n.id} style={{ marginBottom: 6 }}>
                 <button
                   className="app-nav-button"
                   onClick={() => {
@@ -316,8 +341,9 @@ const AppLayout: React.FC = () => {
                   }}
                   style={{
                     ...navButtonBase,
-                    padding: '10px 11px',
-                    borderRadius: 14,
+                    minHeight: 46,
+                    padding: '12px 13px',
+                    borderRadius: 16,
                     background: active ? 'rgba(56, 189, 248, 0.14)' : 'transparent',
                     color: active ? '#F8FAFC' : '#CBD5E1',
                     border: active ? '1px solid rgba(125, 211, 252, 0.22)' : '1px solid transparent',
@@ -341,14 +367,14 @@ const AppLayout: React.FC = () => {
                 {n.children && (
                   <div
                     style={{
-                      maxHeight: expanded ? 360 : 0,
+                      maxHeight: expanded ? 720 : 0,
                       opacity: expanded ? 1 : 0,
                       overflow: 'hidden',
                       transition: 'max-height 0.32s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.24s ease',
-                      paddingLeft: 30,
+                      paddingLeft: 34,
                     }}
                   >
-                    <div style={{ padding: '4px 0 5px' }}>
+                    <div style={{ padding: '6px 0 7px' }}>
                       {n.children
                         .filter((c) => (!c.roles || c.roles.includes(role)) && (!c.access || canAccess(c.access)))
                         .map((c) => {
@@ -360,8 +386,9 @@ const AppLayout: React.FC = () => {
                               onClick={() => navigate(c.path)}
                               style={{
                                 ...navButtonBase,
-                                padding: '7px 9px',
-                                borderRadius: 12,
+                                minHeight: 36,
+                                padding: '9px 10px',
+                                borderRadius: 13,
                                 background: childActive ? 'rgba(255, 255, 255, 0.08)' : 'transparent',
                                 color: childActive ? C.accentCyan : '#94A3B8',
                                 fontWeight: childActive ? 700 : 500,
@@ -675,6 +702,80 @@ const AppLayout: React.FC = () => {
 
         <main style={{ flex: 1, overflow: 'auto', padding: 30 }}>
           <div style={{ maxWidth: 1480, margin: '0 auto' }}>
+            {stockAlerts.length > 0 && (
+              <div
+                className="stock-alert-banner"
+                style={{
+                  marginBottom: 18,
+                  borderRadius: C.radiusLg,
+                  border: '1px solid rgba(220, 38, 38, 0.34)',
+                  background: 'linear-gradient(135deg, rgba(254, 242, 242, 0.98), rgba(255, 228, 230, 0.92))',
+                  boxShadow: '0 18px 44px rgba(220, 38, 38, 0.16)',
+                  overflow: 'hidden',
+                  animation: 'stock-alert-pulse 1.8s ease-in-out infinite',
+                }}
+              >
+                {stockAlerts.slice(0, 3).map((alert, index) => (
+                  <div
+                    key={alert.id}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 14,
+                      padding: '14px 16px',
+                      borderTop: index === 0 ? 'none' : '1px solid rgba(220, 38, 38, 0.18)',
+                    }}
+                  >
+                    <div
+                      style={{
+                        width: 38,
+                        height: 38,
+                        borderRadius: 14,
+                        background: C.danger,
+                        color: '#fff',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        flexShrink: 0,
+                        boxShadow: '0 10px 22px rgba(220, 38, 38, 0.28)',
+                      }}
+                    >
+                      <WarningOutlined />
+                    </div>
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                      <div style={{ color: C.danger, fontSize: 13, fontWeight: 850, lineHeight: 1.3 }}>
+                        {alert.message}
+                      </div>
+                      <div style={{ color: '#991B1B', fontSize: 11, marginTop: 4 }}>
+                        Остаток: {alert.current_quantity} {alert.unit_of_measure} · Порог: {alert.threshold_quantity}
+                        {alert.warehouse_name ? ` · ${alert.warehouse_name}` : ''}
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => navigate(alert.action_url)}
+                      style={{
+                        border: `1px solid ${C.danger}`,
+                        background: C.danger,
+                        color: '#fff',
+                        borderRadius: C.radiusSm,
+                        padding: '9px 13px',
+                        fontSize: 12,
+                        fontWeight: 800,
+                        cursor: 'pointer',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      Добавить на склад
+                    </button>
+                  </div>
+                ))}
+                {stockAlerts.length > 3 && (
+                  <div style={{ padding: '0 16px 12px', color: C.danger, fontSize: 12, fontWeight: 750 }}>
+                    Еще критических позиций: {stockAlerts.length - 3}
+                  </div>
+                )}
+              </div>
+            )}
             <Outlet />
           </div>
         </main>

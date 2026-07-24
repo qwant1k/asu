@@ -1,7 +1,7 @@
 """Административная панель Django для справочников."""
 
 from django.contrib import admin
-from .models import Asset, AssetCategory, Counterparty, LimitNorm, Position, RequestType, UnitOfMeasure, Warehouse
+from .models import Asset, AssetCategory, Contract, Counterparty, LimitNorm, Position, RequestType, UnitOfMeasure, Warehouse
 
 
 @admin.register(Counterparty)
@@ -9,6 +9,13 @@ class CounterpartyAdmin(admin.ModelAdmin):
     list_display = ['name', 'bin', 'contact_person', 'is_active']
     search_fields = ['name', 'bin']
     list_filter = ['is_active']
+
+
+@admin.register(Contract)
+class ContractAdmin(admin.ModelAdmin):
+    list_display = ['name', 'counterparty', 'contract_date', 'valid_until', 'created_at']
+    search_fields = ['name', 'counterparty__name', 'counterparty__bin']
+    list_filter = ['contract_date', 'valid_until']
 
 
 @admin.register(LimitNorm)
@@ -31,8 +38,8 @@ class AssetCategoryAdmin(admin.ModelAdmin):
 
 @admin.register(Asset)
 class AssetAdmin(admin.ModelAdmin):
-    list_display = ['name', 'code', 'asset_type', 'category', 'unit_price', 'is_long_term_use']
-    list_filter = ['asset_type', 'is_long_term_use', 'category']
+    list_display = ['name', 'code', 'asset_type', 'category', 'unit_of_measure_ref', 'unit_price', 'is_long_term_use']
+    list_filter = ['asset_type', 'is_long_term_use', 'category', 'unit_of_measure_ref']
     search_fields = ['name', 'code', 'inventory_number']
 
 

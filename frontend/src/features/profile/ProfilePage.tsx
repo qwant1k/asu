@@ -1,26 +1,53 @@
-﻿import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useParams } from 'react-router-dom';
+import {
+  ArrowLeftOutlined,
+  BellOutlined,
+  CameraOutlined,
+  CheckCircleOutlined,
+  DeleteOutlined,
+  EditOutlined,
+  FileTextOutlined,
+  IdcardOutlined,
+  MailOutlined,
+  PhoneOutlined,
+  SaveOutlined,
+  TeamOutlined,
+  UserOutlined,
+} from '@ant-design/icons';
 import { useAppDispatch, useAppSelector } from '../../app/hooks';
 import api from '../../api/axios';
 import { authApi } from '../../api/auth';
 import { fetchCurrentUser } from '../auth/authSlice';
 import type { AssetRequest, Department, Notification, PaginatedResponse, User } from '../../shared/types';
 import {
-  C, PageHeader, Panel, Btn, Badge, InputField, SelectField, StatCard,
-  Spinner, EmptyState,
+  C, Btn, Badge, InputField, SelectField, StatCard, Spinner, EmptyState, Modal, Tabs,
 } from '../../shared/ui/primitives';
+import './profile.css';
 
-const fmt = (v?: string | null) => {
-  if (!v) return '—';
-  const d = new Date(v);
-  return Number.isNaN(d.getTime()) ? v : d.toLocaleString('ru-KZ');
+type ProfileTab = 'work' | 'history' | 'notifications';
+
+const fmt = (value?: string | null) => {
+  if (!value) return '—';
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString('ru-RU');
 };
 
-const InfoRow = ({ label, value }: { label: string; value: string }) => (
-  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: `1px solid ${C.rowBorder}`, fontSize: 13 }}>
-    <span style={{ color: C.secondary }}>{label}</span>
-    <strong style={{ color: C.heading }}>{value}</strong>
+const getInitials = (u: User | null) => {
+  if (!u) return 'U';
+  const parts = [u.last_name, u.first_name].filter(Boolean);
+  if (parts.length) return parts.map((part) => part[0]).join('').slice(0, 2).toUpperCase();
+  return (u.username || 'U').slice(0, 2).toUpperCase();
+};
+
+const InfoItem = ({ label, value, icon }: { label: string; value: React.ReactNode; icon: React.ReactNode }) => (
+  <div className="profile-info-item">
+    <div className="profile-info-item__icon">{icon}</div>
+    <div className="profile-info-item__body">
+      <span>{label}</span>
+      <strong>{value || '—'}</strong>
+    </div>
   </div>
 );
 
@@ -37,8 +64,10 @@ const ProfilePage: React.FC = () => {
   const [requests, setRequests] = useState<AssetRequest[]>([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState('');
+  const [editOpen, setEditOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState<ProfileTab>('work');
 
-  /* form fields */
   const [fLastName, setFLastName] = useState('');
   const [fFirstName, setFFirstName] = useState('');
   const [fPatronymic, setFPatronymic] = useState('');
@@ -54,11 +83,17 @@ const ProfilePage: React.FC = () => {
   const isOwnProfile = !viewedUserId || viewedUserId === user?.id;
 
   const resetFormFields = (u: User) => {
-    setFLastName(u.last_name || ''); setFFirstName(u.first_name || '');
-    setFPatronymic(u.patronymic || ''); setFEmail(u.email || '');
-    setFPhone(u.phone || ''); setFPosition(u.position || '');
+    setFLastName(u.last_name || '');
+    setFFirstName(u.first_name || '');
+    setFPatronymic(u.patronymic || '');
+    setFEmail(u.email || '');
+    setFPhone(u.phone || '');
+    setFPosition(u.position_ref_name || u.position || '');
     setFDept(u.department ? String(u.department) : '');
-    setPhotoPreview(null); setPhotoFile(null); setRemovePhoto(false);
+    setPhotoPreview(null);
+    setPhotoFile(null);
+    setRemovePhoto(false);
+    setSaveError('');
   };
 
   useEffect(() => {
@@ -68,9 +103,20 @@ const ProfilePage: React.FC = () => {
       setLoading(true);
       try {
         const profileReq = isOwnProfile ? authApi.getMe() : api.get<User>(`/users/${viewedUserId}/`);
-        const reqsReq = api.get<PaginatedResponse<AssetRequest>>('/requests/', { params: { initiator: isOwnProfile ? user.id : viewedUserId, page_size: 100, ordering: '-created_at' } });
-        const tasks: Promise<any>[] = [api.get('/departments/', { params: { page_size: 200 } }), profileReq, reqsReq];
+        const reqsReq = api.get<PaginatedResponse<AssetRequest>>('/requests/', {
+          params: {
+            initiator: isOwnProfile ? user.id : viewedUserId,
+            page_size: 100,
+            ordering: '-created_at',
+          },
+        });
+        const tasks: Promise<any>[] = [
+          api.get('/departments/', { params: { page_size: 300, ordering: 'name' } }),
+          profileReq,
+          reqsReq,
+        ];
         if (isOwnProfile) tasks.push(api.get('/notifications/', { params: { page_size: 20 } }));
+
         const responses = await Promise.all(tasks);
         if (!active) return;
         setDepartments(responses[0].data.results || []);
@@ -79,207 +125,365 @@ const ProfilePage: React.FC = () => {
         resetFormFields(pUser);
         setRequests(responses[2].data.results || []);
         setNotifications(isOwnProfile ? (responses[3]?.data.results || []) : []);
-      } catch { /* */ } finally { if (active) setLoading(false); }
+      } catch {
+        if (active) setProfileUser(null);
+      } finally {
+        if (active) setLoading(false);
+      }
     };
     fetchData();
     return () => { active = false; };
   }, [id, isOwnProfile, user, viewedUserId]);
 
-  useEffect(() => () => { if (photoPreview) URL.revokeObjectURL(photoPreview); }, [photoPreview]);
+  useEffect(() => () => {
+    if (photoPreview) URL.revokeObjectURL(photoPreview);
+  }, [photoPreview]);
 
   const completionPercent = useMemo(() => {
     if (!profileUser) return 0;
-    const fields = [profileUser.photo, profileUser.last_name, profileUser.first_name, profileUser.patronymic, profileUser.position, profileUser.phone, profileUser.email, profileUser.department];
+    const fields = [
+      profileUser.photo,
+      profileUser.last_name,
+      profileUser.first_name,
+      profileUser.patronymic,
+      profileUser.position_ref_name || profileUser.position,
+      profileUser.phone,
+      profileUser.email,
+      profileUser.department,
+    ];
     return Math.round((fields.filter(Boolean).length / fields.length) * 100);
   }, [profileUser]);
 
   const unreadCount = notifications.filter((n) => !n.is_read).length;
   const currentPhoto = removePhoto ? null : photoPreview || profileUser?.photo || null;
 
-  const handlePhotoInput = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
+  const handlePhotoInput = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
     if (!file) return;
     if (photoPreview) URL.revokeObjectURL(photoPreview);
-    setPhotoFile(file); setPhotoPreview(URL.createObjectURL(file)); setRemovePhoto(false);
+    setPhotoFile(file);
+    setPhotoPreview(URL.createObjectURL(file));
+    setRemovePhoto(false);
+  };
+
+  const removeCurrentPhoto = () => {
+    if (photoPreview) URL.revokeObjectURL(photoPreview);
+    setPhotoPreview(null);
+    setPhotoFile(null);
+    setRemovePhoto(true);
+  };
+
+  const openEditProfile = () => {
+    if (!profileUser) return;
+    resetFormFields(profileUser);
+    setEditOpen(true);
+  };
+
+  const closeEditProfile = () => {
+    if (profileUser) resetFormFields(profileUser);
+    setEditOpen(false);
+  };
+
+  const formatError = (err: any) => {
+    const data = err?.response?.data;
+    if (!data) return t('common.error');
+    if (typeof data === 'string') return data;
+    return Object.values(data).flat().join('; ');
   };
 
   const handleSave = async () => {
     if (!isOwnProfile) return;
     setSaving(true);
+    setSaveError('');
     try {
       const fd = new FormData();
-      fd.append('first_name', fFirstName); fd.append('last_name', fLastName);
-      fd.append('patronymic', fPatronymic); fd.append('email', fEmail);
-      fd.append('phone', fPhone); fd.append('position', fPosition);
+      fd.append('first_name', fFirstName);
+      fd.append('last_name', fLastName);
+      fd.append('patronymic', fPatronymic);
+      fd.append('email', fEmail);
+      fd.append('phone', fPhone);
+      fd.append('position', fPosition);
       fd.append('department', fDept || '');
       if (photoFile) fd.append('photo', photoFile);
       if (removePhoto) fd.append('remove_photo', 'true');
+
       await authApi.updateProfile(fd);
       const refreshed = await dispatch(fetchCurrentUser()).unwrap();
       setProfileUser(refreshed);
-    } catch { /* */ } finally { setSaving(false); }
+      resetFormFields(refreshed);
+      setEditOpen(false);
+    } catch (err: any) {
+      setSaveError(formatError(err));
+    } finally {
+      setSaving(false);
+    }
   };
 
   const markAllRead = async () => {
-    try { await api.post('/notifications/mark-all-read/'); setNotifications((prev) => prev.map((n) => ({ ...n, is_read: true }))); } catch { /* */ }
+    try {
+      await api.post('/notifications/mark-all-read/');
+      setNotifications((prev) => prev.map((n) => ({ ...n, is_read: true })));
+    } catch { /* ignore */ }
   };
 
   const openNotification = async (notification: Notification) => {
     try {
       if (!notification.is_read) {
         await api.patch(`/notifications/${notification.id}/read/`);
-        setNotifications((prev) => prev.map((n) => (n.id === notification.id ? { ...n, is_read: true } : n)));
+        setNotifications((prev) => prev.map((n) => (
+          n.id === notification.id ? { ...n, is_read: true } : n
+        )));
       }
-    } catch { /* */ }
+    } catch { /* ignore */ }
 
     if (notification.related_model === 'assetrequest' && notification.related_object_id) {
       navigate(`/requests/${notification.related_object_id}`);
     }
   };
 
-  if (loading || !profileUser) return <Spinner />;
+  if (loading) return <Spinner />;
+  if (!profileUser) return <EmptyState text={t('common.notFound')} />;
+
+  const roleLabel = t(`roles.${profileUser.role}`, { defaultValue: profileUser.role });
+  const displayPosition = profileUser.position_ref_name || profileUser.position || 'Должность не указана';
+  const profileTabs = [
+    { key: 'work', label: 'Рабочая информация' },
+    { key: 'history', label: 'История' },
+    { key: 'notifications', label: 'Уведомления' },
+  ];
 
   return (
-    <div>
-      {/* Hero */}
-      <div style={{
-        background: 'linear-gradient(135deg, #111827 0%, #1F2937 58%, #0F172A 100%)',
-        borderRadius: C.radiusXl,
-        padding: '32px 36px',
-        marginBottom: 24,
-        color: '#fff',
-        border: '1px solid rgba(255, 255, 255, 0.08)',
-        boxShadow: '0 24px 60px rgba(15, 23, 42, 0.22)',
-      }}>
-        <div style={{ display: 'flex', gap: 24, alignItems: 'center', flexWrap: 'wrap' }}>
-          <div style={{
-            width: 88, height: 88, borderRadius: 24, background: 'rgba(56, 189, 248, 0.16)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 32, fontWeight: 700, flexShrink: 0,
-            overflow: 'hidden', border: '1px solid rgba(125, 211, 252, 0.26)',
-          }}>
-            {currentPhoto ? <img src={currentPhoto} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : (profileUser.full_name?.[0] || '👤')}
+    <div className="profile-page">
+      <section className="profile-hero">
+        <div className="profile-hero__top">
+          {!isOwnProfile && (
+            <Btn variant="secondary" onClick={() => navigate(-1)}>
+              <ArrowLeftOutlined /> {t('common.back')}
+            </Btn>
+          )}
+          {isOwnProfile && (
+            <Btn onClick={openEditProfile}>
+              <EditOutlined /> Изменить профиль
+            </Btn>
+          )}
+        </div>
+
+        <div className="profile-hero__main">
+          <div className="profile-photo">
+            {currentPhoto ? (
+              <img src={currentPhoto} alt={profileUser.full_name || profileUser.username} />
+            ) : (
+              <span>{getInitials(profileUser)}</span>
+            )}
           </div>
-          <div style={{ flex: 1 }}>
-            <Badge status={t(`roles.${profileUser.role}`)} />
-            <h2 style={{ fontSize: 22, fontWeight: 700, margin: '4px 0' }}>{profileUser.full_name || profileUser.username}</h2>
-            <p style={{ fontSize: 13, opacity: 0.85, margin: 0 }}>
-              {profileUser.position || 'Сотрудник'}{profileUser.department_name ? ` · ${profileUser.department_name}` : ''}
-            </p>
-            <div style={{ display: 'flex', gap: 16, marginTop: 8, flexWrap: 'wrap', fontSize: 12, opacity: 0.82 }}>
-              <span>📧 {profileUser.email || 'Email не указан'}</span>
-              <span>📞 {profileUser.phone || 'Телефон не указан'}</span>
-              <span>👔 {profileUser.supervisor_name || 'Руководитель не назначен'}</span>
+
+          <div className="profile-identity">
+            <div className="profile-identity__badges">
+              <Badge status={roleLabel} />
+              <Badge status={profileUser.is_active ? 'Активен' : 'Неактивен'} />
+            </div>
+            <h1>{profileUser.full_name || profileUser.username}</h1>
+            <p>{displayPosition}</p>
+            <div className="profile-identity__meta">
+              <span><TeamOutlined /> {profileUser.department_name || 'Подразделение не указано'}</span>
+              <span><IdcardOutlined /> {profileUser.username}</span>
+              <span><UserOutlined /> {profileUser.supervisor_name || 'Руководитель не назначен'}</span>
+            </div>
+          </div>
+
+          <div className="profile-completion">
+            <div className="profile-completion__value">{completionPercent}%</div>
+            <div className="profile-completion__label">Заполнение профиля</div>
+            <div className="profile-progress">
+              <span style={{ width: `${completionPercent}%` }} />
             </div>
           </div>
         </div>
+
+      </section>
+
+      <div className="profile-stats">
+        <StatCard label="Заявки" value={requests.length} sub="история сотрудника" />
+        <StatCard label={isOwnProfile ? 'Непрочитанные' : 'Последний вход'} value={isOwnProfile ? unreadCount : fmt(profileUser.last_login)} sub={isOwnProfile ? 'в колокольчике' : 'активность'} color={C.info} />
+        <StatCard label="Права доступа" value={profileUser.effective_permissions?.length || 0} sub={roleLabel} color={C.teal} />
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 16, marginBottom: 24 }}>
-        <StatCard label="Профиль заполнен" value={`${completionPercent}%`} />
-        <StatCard label="История заявок" value={requests.length} />
-        <StatCard label={isOwnProfile ? 'Непрочитанные' : 'Дата регистрации'} value={isOwnProfile ? unreadCount : fmt(profileUser.date_joined)} />
+      <div className="profile-tabs-bar">
+        <Tabs
+          activeKey={activeTab}
+          items={profileTabs}
+          onChange={(key) => setActiveTab(key as ProfileTab)}
+        />
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 360px), 1fr))', gap: 20 }}>
-        {/* Left */}
-        <div>
-          <Panel title={t('profile.personalInfo')}
-            subtitle={isOwnProfile ? 'Актуализируйте контакты, ФИО, должность и подразделение.' : 'Просмотр данных сотрудника.'}
-            titleRight={isOwnProfile ? <Btn onClick={handleSave} loading={saving}>💾 {t('common.save')}</Btn> : undefined}
-          >
-            {/* Photo */}
-            <div style={{ display: 'flex', gap: 16, alignItems: 'center', marginBottom: 20 }}>
-              <div style={{ width: 72, height: 72, borderRadius: '50%', background: C.accentLight, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', flexShrink: 0 }}>
-                {currentPhoto ? <img src={currentPhoto} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <span style={{ fontSize: 28 }}>👤</span>}
+      <div className="profile-grid profile-grid--tabs">
+        <div className="profile-main-column" style={{ display: activeTab === 'history' ? undefined : 'none' }}>
+          <section className="profile-panel">
+            <div className="profile-panel__head">
+              <div>
+                <h2>История заявок</h2>
+                <p>Последние заявки, созданные сотрудником</p>
               </div>
-              {isOwnProfile && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  <label style={{ cursor: 'pointer', color: C.accent, fontSize: 13, fontWeight: 500 }}>
-                    📷 Загрузить фото
-                    <input type="file" accept="image/*" onChange={handlePhotoInput} style={{ display: 'none' }} />
-                  </label>
-                  {currentPhoto && <button onClick={() => { if (photoPreview) URL.revokeObjectURL(photoPreview); setPhotoPreview(null); setPhotoFile(null); setRemovePhoto(true); }} style={{ background: 'none', border: 'none', color: C.danger, fontSize: 12, cursor: 'pointer', textAlign: 'left', padding: 0 }}>Удалить фото</button>}
-                  <span style={{ fontSize: 11, color: C.muted }}>JPG, PNG</span>
-                </div>
-              )}
+              <Badge status={`${requests.length} записей`} />
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 14, marginBottom: 14 }}>
-              <InputField label={t('profile.lastName')} value={fLastName} onChange={(e) => setFLastName(e.target.value)} disabled={!isOwnProfile} />
-              <InputField label={t('profile.firstName')} value={fFirstName} onChange={(e) => setFFirstName(e.target.value)} disabled={!isOwnProfile} />
-              <InputField label={t('profile.patronymic')} value={fPatronymic} onChange={(e) => setFPatronymic(e.target.value)} disabled={!isOwnProfile} />
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14 }}>
-              <InputField label={t('profile.position')} value={fPosition} onChange={(e) => setFPosition(e.target.value)} disabled={!isOwnProfile} />
-              <SelectField label={t('profile.department')} value={fDept} onChange={(e) => setFDept(e.target.value)} disabled={!isOwnProfile}
-                options={[{ value: '', label: '— не выбрано —' }, ...departments.map((d) => ({ value: d.id, label: `${d.name} (${d.code})` }))]} />
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-              <InputField label={t('profile.email')} value={fEmail} onChange={(e) => setFEmail(e.target.value)} disabled={!isOwnProfile} />
-              <InputField label={t('profile.phone')} value={fPhone} onChange={(e) => setFPhone(e.target.value)} disabled={!isOwnProfile} />
-            </div>
-          </Panel>
-
-          <Panel title="История заявок" subtitle="Все заявки сотрудника" style={{ marginTop: 20 }}>
             {requests.length === 0 ? <EmptyState text="Заявки не найдены" /> : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                {requests.map((r) => (
-                  <div key={r.id} onClick={() => navigate(`/requests/${r.id}`)} style={{
-                    padding: '10px 14px', borderRadius: C.radiusSm, cursor: 'pointer', background: C.glassStrong,
-                    border: `1px solid ${C.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                    transition: 'border-color 0.15s',
-                  }}
-                  onMouseEnter={(e) => { e.currentTarget.style.borderColor = C.accent; }}
-                  onMouseLeave={(e) => { e.currentTarget.style.borderColor = C.border; }}>
-                    <div>
-                      <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                        <strong style={{ fontSize: 13, color: C.heading }}>{r.number}</strong>
-                        <Badge status={r.request_type_name} />
-                        <Badge status={r.status_display} />
+              <div className="profile-request-list">
+                {requests.map((request) => (
+                  <button
+                    key={request.id}
+                    type="button"
+                    className="profile-request-item"
+                    onClick={() => navigate(`/requests/${request.id}`)}
+                  >
+                    <div className="profile-request-item__icon"><FileTextOutlined /></div>
+                    <div className="profile-request-item__body">
+                      <div className="profile-request-item__title">
+                        <strong>{request.number}</strong>
+                        <Badge status={request.status_display} />
                       </div>
-                      <div style={{ fontSize: 11, color: C.muted, marginTop: 2 }}>Создана: {fmt(r.created_at)} · Обновлена: {fmt(r.updated_at)}</div>
+                      <span>{request.request_type_name} · {fmt(request.created_at)}</span>
                     </div>
-                    <span style={{ color: C.accent, fontSize: 13, fontWeight: 500 }}>Открыть →</span>
-                  </div>
+                  </button>
                 ))}
               </div>
             )}
-          </Panel>
+          </section>
         </div>
 
-        {/* Right */}
-        <div>
-          <Panel title={isOwnProfile ? 'Рабочая информация' : 'Карточка сотрудника'}>
-            <InfoRow label="Логин" value={profileUser.username} />
-            <InfoRow label="Роль" value={t(`roles.${profileUser.role}`)} />
-            <InfoRow label="Подразделение" value={profileUser.department_name || 'Не указано'} />
-            <InfoRow label="Руководитель" value={profileUser.supervisor_name || 'Не указан'} />
-            <InfoRow label="Дата регистрации" value={fmt(profileUser.date_joined)} />
-          </Panel>
+        <aside className="profile-side-column" style={{ display: activeTab === 'work' || activeTab === 'notifications' ? undefined : 'none' }}>
+          <section className="profile-panel" style={{ display: activeTab === 'work' ? undefined : 'none' }}>
+            <div className="profile-panel__head">
+              <div>
+                <h2>Рабочая информация</h2>
+                <p>Роль, подразделение и активность</p>
+              </div>
+            </div>
+            <div className="profile-info-list">
+              <InfoItem label="Логин" value={profileUser.username} icon={<IdcardOutlined />} />
+              <InfoItem label="Роль" value={roleLabel} icon={<CheckCircleOutlined />} />
+              <InfoItem label="Подразделение" value={profileUser.department_name || 'Не указано'} icon={<TeamOutlined />} />
+              <InfoItem label="Руководитель" value={profileUser.supervisor_name || 'Не указан'} icon={<UserOutlined />} />
+              <InfoItem label="Email" value={profileUser.email || 'Не указан'} icon={<MailOutlined />} />
+              <InfoItem label="Телефон" value={profileUser.phone || 'Не указан'} icon={<PhoneOutlined />} />
+              <InfoItem label="Дата регистрации" value={fmt(profileUser.date_joined)} icon={<CheckCircleOutlined />} />
+              <InfoItem label="Последний вход" value={fmt(profileUser.last_login)} icon={<CheckCircleOutlined />} />
+            </div>
+          </section>
 
           {isOwnProfile && (
-            <Panel title={t('notifications.title')} subtitle="Последние системные уведомления."
-              titleRight={<Btn variant="secondary" onClick={markAllRead} disabled={!unreadCount}>✓ {t('notifications.markAllRead')}</Btn>}
-              style={{ marginTop: 20 }}
-            >
+            <section className="profile-panel" style={{ display: activeTab === 'notifications' ? undefined : 'none' }}>
+              <div className="profile-panel__head profile-panel__head--compact">
+                <div>
+                  <h2>{t('notifications.title')}</h2>
+                  <p>Последние события</p>
+                </div>
+                <Btn variant="secondary" onClick={markAllRead} disabled={!unreadCount}>
+                  <BellOutlined /> Прочитано
+                </Btn>
+              </div>
+
               {notifications.length === 0 ? <EmptyState text={t('notifications.noNotifications')} /> : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  {notifications.map((n) => (
-                    <div key={n.id} onClick={() => openNotification(n)} style={{
-                      padding: '10px 12px', borderRadius: C.radiusSm, background: n.is_read ? C.glassStrong : C.accentLight,
-                      border: `1px solid ${C.border}`, cursor: n.related_object_id ? 'pointer' : 'default',
-                    }}>
-                      <div style={{ fontSize: 13, fontWeight: n.is_read ? 400 : 600, color: C.heading }}>{n.title}</div>
-                      <div style={{ fontSize: 12, color: C.secondary }}>{n.body}</div>
-                      <div style={{ fontSize: 11, color: C.muted, marginTop: 2 }}>{fmt(n.created_at)}</div>
-                    </div>
+                <div className="profile-notification-list">
+                  {notifications.map((notification) => (
+                    <button
+                      key={notification.id}
+                      type="button"
+                      className={`profile-notification ${notification.is_read ? '' : 'profile-notification--unread'}`}
+                      onClick={() => openNotification(notification)}
+                    >
+                      <div className="profile-notification__icon"><BellOutlined /></div>
+                      <div className="profile-notification__body">
+                        <strong>{notification.title}</strong>
+                        <span>{notification.body}</span>
+                        <small>{fmt(notification.created_at)}</small>
+                      </div>
+                    </button>
                   ))}
                 </div>
               )}
-            </Panel>
+            </section>
           )}
-        </div>
+
+          {!isOwnProfile && (
+            <section className="profile-panel" style={{ display: activeTab === 'notifications' ? undefined : 'none' }}>
+              <div className="profile-panel__head profile-panel__head--compact">
+                <div>
+                  <h2>{t('notifications.title')}</h2>
+                  <p>Персональные уведомления</p>
+                </div>
+              </div>
+              <EmptyState text="Уведомления доступны только в собственном личном кабинете" />
+            </section>
+          )}
+        </aside>
       </div>
+
+      <Modal
+        open={editOpen}
+        onClose={closeEditProfile}
+        title="Изменить профиль"
+        width={760}
+        footer={(
+          <>
+            <Btn variant="secondary" onClick={closeEditProfile}>{t('common.cancel')}</Btn>
+            <Btn onClick={handleSave} loading={saving}>
+              <SaveOutlined /> {t('common.save')}
+            </Btn>
+          </>
+        )}
+      >
+        {saveError && <div className="profile-error">{saveError}</div>}
+
+        <div className="profile-edit-photo">
+          <div className="profile-edit-photo__preview">
+            {currentPhoto ? (
+              <img src={currentPhoto} alt={profileUser.full_name || profileUser.username} />
+            ) : (
+              <span>{getInitials(profileUser)}</span>
+            )}
+          </div>
+          <div className="profile-edit-photo__body">
+            <strong>Фотография профиля</strong>
+            <span>Используйте портретное фото в JPG или PNG.</span>
+            <div className="profile-photo-actions profile-photo-actions--modal">
+              <label className="profile-upload-button">
+                <CameraOutlined /> Загрузить фото
+                <input type="file" accept="image/*" onChange={handlePhotoInput} />
+              </label>
+              {currentPhoto && (
+                <button type="button" className="profile-remove-photo" onClick={removeCurrentPhoto}>
+                  <DeleteOutlined /> Удалить фото
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+
+        <div className="profile-form-grid profile-form-grid--three">
+          <InputField label={t('profile.lastName')} value={fLastName} onChange={(e) => setFLastName(e.target.value)} />
+          <InputField label={t('profile.firstName')} value={fFirstName} onChange={(e) => setFFirstName(e.target.value)} />
+          <InputField label={t('profile.patronymic')} value={fPatronymic} onChange={(e) => setFPatronymic(e.target.value)} />
+        </div>
+
+        <div className="profile-form-grid">
+          <InputField label={t('profile.position')} value={fPosition} onChange={(e) => setFPosition(e.target.value)} />
+          <SelectField
+            label={t('profile.department')}
+            value={fDept}
+            onChange={(e) => setFDept(e.target.value)}
+            options={[
+              { value: '', label: 'Не выбрано' },
+              ...departments.map((d) => ({ value: d.id, label: `${d.name}${d.code ? ` (${d.code})` : ''}` })),
+            ]}
+          />
+        </div>
+
+        <div className="profile-form-grid">
+          <InputField label={t('profile.email')} value={fEmail} onChange={(e) => setFEmail(e.target.value)} />
+          <InputField label={t('profile.phone')} value={fPhone} onChange={(e) => setFPhone(e.target.value)} />
+        </div>
+      </Modal>
     </div>
   );
 };

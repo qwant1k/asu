@@ -2,6 +2,7 @@
 
 from decimal import Decimal
 from django.db import transaction
+from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
 from apps.common.constants import (
@@ -12,9 +13,10 @@ from apps.common.constants import (
     ASSIGNMENT_ACTIVE,
     ASSIGNMENT_TRANSFERRED,
     ASSIGNMENT_WRITTEN_OFF,
+    NOTIFICATION_STOCK_ALERT,
 )
 
-from .models import WarehouseStock, AssetAssignment, StockMovement
+from .models import WarehouseStock, AssetAssignment, StockMovement, StockAlertRule, StockAlertState
 
 
 class StockService:
@@ -22,7 +24,7 @@ class StockService:
 
     @staticmethod
     @transaction.atomic
-    def receive_stock(asset, quantity, price, document=None, performed_by=None, location=''):
+    def receive_stock(asset, quantity, price, document=None, performed_by=None, location='', warehouse=None):
         """
         Оприходование актива на склад.
 
@@ -39,10 +41,12 @@ class StockService:
 
         stock, created = WarehouseStock.objects.get_or_create(
             asset=asset,
-            defaults={'quantity': 0, 'total_amount': 0, 'location': location},
+            defaults={'quantity': 0, 'total_amount': 0, 'location': location, 'warehouse': warehouse},
         )
         stock.quantity += quantity
         stock.total_amount = stock.quantity * asset.unit_price
+        if warehouse:
+            stock.warehouse = warehouse
         if location:
             stock.location = location
         stock.save()
@@ -54,6 +58,7 @@ class StockService:
             unit_price=price,
             total_amount=quantity * price,
             performed_by=performed_by,
+            warehouse=stock.warehouse,
         )
 
         if document:
@@ -101,6 +106,7 @@ class StockService:
             total_amount=quantity * asset.unit_price,
             to_user=to_user,
             performed_by=performed_by,
+            warehouse=stock.warehouse,
         )
 
         if document:
@@ -116,6 +122,8 @@ class StockService:
                 user=to_user,
                 quantity=quantity,
                 assigned_by=performed_by,
+                warehouse=stock.warehouse,
+                location=stock.location,
                 status=ASSIGNMENT_ACTIVE,
             )
 
@@ -169,6 +177,8 @@ class StockService:
             user=to_user,
             quantity=quantity,
             assigned_by=performed_by,
+            warehouse=assignment.warehouse,
+            location=assignment.location,
             status=ASSIGNMENT_ACTIVE,
         )
 
@@ -181,6 +191,7 @@ class StockService:
             from_user=from_user,
             to_user=to_user,
             performed_by=performed_by,
+            warehouse=assignment.warehouse,
         )
 
         if document:
@@ -233,6 +244,7 @@ class StockService:
             unit_price=asset.unit_price,
             total_amount=quantity * asset.unit_price,
             performed_by=performed_by,
+            warehouse=stock.warehouse,
             comment=comment,
         )
 
@@ -243,3 +255,112 @@ class StockService:
             movement.save(update_fields=['document_type', 'document_id'])
 
         return movement
+
+
+class StockAlertService:
+    """Контроль критических остатков и создание складских алармов."""
+
+    @staticmethod
+    def render_message(rule, stock):
+        asset = stock.asset
+        template = rule.message_template or '{asset_name} на исходе, требуется срочное пополнение склада. Остаток: {quantity} {unit}.'
+        try:
+            return template.format(
+                asset_name=asset.name,
+                asset_code=asset.code,
+                quantity=stock.quantity,
+                threshold=rule.threshold_quantity,
+                unit=asset.unit_of_measure,
+                warehouse=stock.warehouse.name if stock.warehouse_id else stock.location,
+            )
+        except (KeyError, ValueError):
+            return f'{asset.name} на исходе, требуется срочное пополнение склада. Остаток: {stock.quantity} {asset.unit_of_measure}.'
+
+    @staticmethod
+    def rule_matches_stock(rule, stock):
+        asset = stock.asset
+        if rule.warehouses.exists() and stock.warehouse_id not in set(rule.warehouses.values_list('id', flat=True)):
+            return False
+
+        asset_ids = set(rule.assets.values_list('id', flat=True))
+        group_ids = set(rule.groups.values_list('id', flat=True))
+
+        if not asset_ids and not group_ids:
+            return True
+
+        if asset.id in asset_ids:
+            return True
+
+        related_group_ids = {asset.category_id}
+        if asset.group_id:
+            related_group_ids.add(asset.group_id)
+        return bool(group_ids.intersection(related_group_ids))
+
+    @staticmethod
+    def notify_recipients(rule, state):
+        from apps.notifications.services import NotificationService
+
+        for recipient in rule.recipients.filter(is_active=True):
+            NotificationService.send(
+                recipient=recipient,
+                notification_type=NOTIFICATION_STOCK_ALERT,
+                title='Критический остаток на складе',
+                body=state.message,
+                related_object=state.stock,
+            )
+        state.last_notified_at = timezone.now()
+        state.save(update_fields=['last_notified_at'])
+
+    @staticmethod
+    def evaluate_stock(stock):
+        matched_rule_ids = []
+        rules = StockAlertRule.objects.filter(is_active=True).prefetch_related(
+            'recipients', 'groups', 'assets', 'warehouses',
+        )
+
+        for rule in rules:
+            if not StockAlertService.rule_matches_stock(rule, stock):
+                continue
+
+            matched_rule_ids.append(rule.id)
+            is_critical = stock.quantity <= rule.threshold_quantity
+            state = StockAlertState.objects.filter(rule=rule, stock=stock).first()
+
+            if is_critical:
+                message = StockAlertService.render_message(rule, stock)
+                if not state:
+                    state = StockAlertState.objects.create(
+                        rule=rule,
+                        stock=stock,
+                        is_active=True,
+                        current_quantity=stock.quantity,
+                        message=message,
+                    )
+                    StockAlertService.notify_recipients(rule, state)
+                else:
+                    was_inactive = not state.is_active
+                    state.is_active = True
+                    state.current_quantity = stock.quantity
+                    state.message = message
+                    state.resolved_at = None
+                    state.save(update_fields=['is_active', 'current_quantity', 'message', 'resolved_at'])
+                    if was_inactive:
+                        StockAlertService.notify_recipients(rule, state)
+            elif state and state.is_active:
+                state.is_active = False
+                state.current_quantity = stock.quantity
+                state.resolved_at = timezone.now()
+                state.save(update_fields=['is_active', 'current_quantity', 'resolved_at'])
+
+        inactive_qs = StockAlertState.objects.filter(stock=stock, is_active=True)
+        if matched_rule_ids:
+            inactive_qs = inactive_qs.exclude(rule_id__in=matched_rule_ids)
+        inactive_qs.update(is_active=False, current_quantity=stock.quantity, resolved_at=timezone.now())
+
+    @staticmethod
+    def evaluate_rule(rule):
+        stocks = WarehouseStock.objects.select_related(
+            'asset', 'asset__category', 'asset__group', 'warehouse',
+        )
+        for stock in stocks:
+            StockAlertService.evaluate_stock(stock)

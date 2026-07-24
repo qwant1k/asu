@@ -14,7 +14,7 @@ class WarehouseStockFilter(django_filters.FilterSet):
 
     class Meta:
         model = WarehouseStock
-        fields = ['asset_type', 'category', 'group']
+        fields = ['asset_type', 'category', 'group', 'warehouse']
 
 
 class AssignmentFilter(django_filters.FilterSet):
@@ -42,4 +42,4 @@ class MovementFilter(django_filters.FilterSet):
 
     class Meta:
         model = StockMovement
-        fields = ['movement_type', 'asset', 'asset_type', 'category', 'group', 'performed_after', 'performed_before']
+        fields = ['movement_type', 'asset', 'asset_type', 'category', 'group', 'warehouse', 'performed_after', 'performed_before']

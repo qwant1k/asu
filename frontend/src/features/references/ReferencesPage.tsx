@@ -4,7 +4,9 @@ import { useTranslation } from 'react-i18next';
 import { C, PageHeader, Surface } from '../../shared/ui/primitives';
 
 const cards = [
+  { key: '/references/departments', icon: '🏢', titleKey: 'nav.departments' },
   { key: '/references/counterparties', icon: '🤝', titleKey: 'nav.counterparties' },
+  { key: '/references/contracts', icon: '📄', titleKey: 'nav.contracts' },
   { key: '/references/users', icon: '👤', titleKey: 'nav.users' },
   { key: '/references/limits', icon: '📏', titleKey: 'nav.limits' },
   { key: '/references/request-types', icon: '📋', titleKey: 'nav.requestTypes' },

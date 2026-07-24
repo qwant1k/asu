@@ -1,5 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useNavigate } from 'react-router-dom';
+import { EyeOutlined } from '@ant-design/icons';
 import api from '../../api/axios';
 import type { Counterparty, PaginatedResponse } from '../../shared/types';
 import {
@@ -11,6 +13,7 @@ const PAGE_SIZE = 20;
 
 const CounterpartiesPage: React.FC = () => {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const [data, setData] = useState<Counterparty[]>([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -123,6 +126,7 @@ const CounterpartiesPage: React.FC = () => {
                 <Th>{t('references.contactPerson')}</Th>
                 <Th>{t('profile.phone')}</Th>
                 <Th>{t('profile.email')}</Th>
+                <Th>Договоры</Th>
                 <Th>{t('common.status')}</Th>
                 <Th>{t('common.actions')}</Th>
               </tr>
@@ -130,14 +134,20 @@ const CounterpartiesPage: React.FC = () => {
             <tbody>
               {data.map((r) => (
                 <tr key={r.id} onMouseEnter={(e) => hoverRow(e, true)} onMouseLeave={(e) => hoverRow(e, false)}>
-                  <Td bold>{r.name}</Td>
+                  <Td bold>
+                    <button onClick={() => navigate(`/references/counterparties/${r.id}`)} style={{ background: 'none', border: 'none', color: C.accent, cursor: 'pointer', padding: 0, fontWeight: 750 }}>
+                      {r.name}
+                    </button>
+                  </Td>
                   <Td muted>{r.bin}</Td>
                   <Td>{r.contact_person}</Td>
                   <Td muted>{r.phone}</Td>
                   <Td muted>{r.email}</Td>
+                  <Td><Badge status={`${r.contracts_count || 0}`} /></Td>
                   <Td><Badge status={r.is_active ? t('common.active') : t('common.inactive')} /></Td>
                   <Td>
                     <div style={{ display: 'flex', gap: 6 }}>
+                      <button onClick={() => navigate(`/references/counterparties/${r.id}`)} title="Карточка" style={{ background: 'none', border: 'none', cursor: 'pointer', color: C.info, fontSize: 13 }}><EyeOutlined /></button>
                       <button onClick={() => openEdit(r)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: C.accent, fontSize: 13 }}>✏️</button>
                       <button onClick={() => setConfirmItem(r)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: r.is_active ? C.danger : C.success, fontSize: 13 }}>
                         {r.is_active ? '⛔' : '✅'}

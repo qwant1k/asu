@@ -48,6 +48,14 @@ class User(AbstractUser):
     )
     patronymic = models.CharField(_('Отчество'), max_length=150, blank=True, default='')
     position = models.CharField(_('Должность'), max_length=255, blank=True, default='')
+    position_ref = models.ForeignKey(
+        'references.Position',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='users',
+        verbose_name=_('Должность из справочника'),
+    )
     department = models.ForeignKey(
         Department,
         on_delete=models.SET_NULL,
@@ -74,6 +82,11 @@ class User(AbstractUser):
 
     def __str__(self):
         return self.get_full_name() or self.username
+
+    def save(self, *args, **kwargs):
+        if self.position_ref_id:
+            self.position = self.position_ref.name
+        super().save(*args, **kwargs)
 
     def get_full_name(self):
         parts = [self.last_name, self.first_name, self.patronymic]

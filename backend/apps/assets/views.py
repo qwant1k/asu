@@ -15,33 +15,56 @@ from apps.common.constants import (
     ASSET_TYPE_OS,
     ASSET_TYPE_TMZ,
     MOVEMENT_INVENTORY_ADJUSTMENT,
-    ROLE_ADMIN,
-    ROLE_MOL_NMA,
-    ROLE_MOL_WAREHOUSE,
 )
-from apps.references.models import Asset, AssetCategory
+from apps.references.models import Asset, AssetCategory, UnitOfMeasure, Warehouse
 from apps.users.access import has_access
 
 from .filters import AssignmentFilter, MovementFilter, WarehouseStockFilter
-from .models import WarehouseStock, AssetAssignment, StockMovement
+from .models import WarehouseStock, AssetAssignment, StockMovement, StockAlertRule, StockAlertState
 from .serializers import (
     WarehouseStockSerializer,
     AssetAssignmentSerializer,
     StockMovementSerializer,
+    StockAlertRuleSerializer,
+    ActiveStockAlertSerializer,
 )
+from .services import StockAlertService
 
 
 class CanUploadStock:
-    """Разрешение только для администраторов и МОЛ."""
-
-    UPLOAD_ROLES = {ROLE_ADMIN, ROLE_MOL_WAREHOUSE, ROLE_MOL_NMA}
+    """Разрешение на загрузку остатков склада."""
 
     def has_permission(self, request, view):
         return (
             request.user
             and request.user.is_authenticated
-            and (request.user.role in self.UPLOAD_ROLES or has_access(request.user, 'warehouse.upload'))
+            and has_access(request.user, 'warehouse.upload')
         )
+
+
+class CanViewWarehouse:
+    """Просмотр складских журналов доступен только управляющему контуру."""
+
+    def has_permission(self, request, view):
+        return (
+            request.user
+            and request.user.is_authenticated
+            and has_access(request.user, 'warehouse.view')
+        )
+
+
+class CanManageStockAlerts:
+    """Настройки складских алармов доступны сотрудникам с правом загрузки склада."""
+
+    def has_permission(self, request, view):
+        return (
+            request.user
+            and request.user.is_authenticated
+            and (has_access(request.user, 'warehouse.upload') or has_access(request.user, 'system.admin'))
+        )
+
+    def has_object_permission(self, request, view, obj):
+        return self.has_permission(request, view)
 
 
 class StockUploadView(APIView):
@@ -102,6 +125,16 @@ class StockUploadView(APIView):
             except ValueError:
                 return Response(
                     {'detail': _('balance_date должен быть в формате YYYY-MM-DD')},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        warehouse_id = request.query_params.get('warehouse') or request.data.get('warehouse')
+        default_warehouse = None
+        if warehouse_id:
+            default_warehouse = Warehouse.objects.filter(pk=warehouse_id, is_active=True).first()
+            if not default_warehouse:
+                return Response(
+                    {'detail': _('Склад не найден или не активен')},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
@@ -193,17 +226,23 @@ class StockUploadView(APIView):
                 )
 
             location = str(mapped.get('location', '')).strip()
+            warehouse = self._resolve_warehouse(location) if location else default_warehouse
+            if warehouse and not location:
+                location = warehouse.name
+            unit_ref = self._resolve_unit(unit)
 
             rows.append({
                 'idx': idx,
                 'code': code,
                 'name': name,
                 'unit': unit,
+                'unit_ref': unit_ref,
                 'quantity': quantity,
                 'unit_price': unit_price,
                 'total_amount': total_amount,
                 'category': category,
                 'location': location,
+                'warehouse': warehouse,
             })
 
         with transaction.atomic():
@@ -215,6 +254,7 @@ class StockUploadView(APIView):
                         'asset_type': asset_type,
                         'category': item['category'],
                         'unit_of_measure': item['unit'],
+                        'unit_of_measure_ref': item['unit_ref'],
                         'unit_price': item['unit_price'],
                         'balance_date': balance_date,
                     },
@@ -234,6 +274,7 @@ class StockUploadView(APIView):
                         'quantity': item['quantity'],
                         'total_amount': item['total_amount'],
                         'balance_date': balance_date,
+                        'warehouse': item['warehouse'],
                         'location': item['location'] or (asset.warehouse_stock.location if hasattr(asset, 'warehouse_stock') else ''),
                     },
                 )
@@ -252,6 +293,7 @@ class StockUploadView(APIView):
                         unit_price=item['unit_price'],
                         total_amount=total_delta,
                         performed_by=request.user,
+                        warehouse=stock.warehouse,
                         comment=_('Корректировка остатка по загрузке Excel'),
                     )
 
@@ -285,15 +327,35 @@ class StockUploadView(APIView):
             return Decimal(str(value)).quantize(Decimal('0.1') ** places)
         return Decimal(str(value).replace(' ', '').replace(',', '.')).quantize(Decimal('0.1') ** places)
 
+    def _resolve_unit(self, name):
+        normalized = str(name or '').strip()
+        if not normalized:
+            return None
+        unit = UnitOfMeasure.objects.filter(name__iexact=normalized).first()
+        if unit:
+            return unit
+        code = f'UOM-{UnitOfMeasure.objects.count() + 1:04d}'
+        return UnitOfMeasure.objects.create(name=normalized, code=code)
+
+    def _resolve_warehouse(self, name):
+        normalized = str(name or '').strip()
+        if not normalized:
+            return None
+        warehouse = Warehouse.objects.filter(name__iexact=normalized).first()
+        if warehouse:
+            return warehouse
+        code = f'WH-{Warehouse.objects.count() + 1:04d}'
+        return Warehouse.objects.create(name=normalized, code=code)
+
 
 class WarehouseStockViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin,
                             viewsets.GenericViewSet):
     """Просмотр остатков на складе."""
-    queryset = WarehouseStock.objects.select_related('asset', 'asset__category', 'asset__group').all()
+    queryset = WarehouseStock.objects.select_related('asset', 'asset__category', 'asset__group', 'warehouse').all()
     serializer_class = WarehouseStockSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [CanViewWarehouse]
     filterset_class = WarehouseStockFilter
-    search_fields = ['asset__name', 'asset__code', 'location']
+    search_fields = ['asset__name', 'asset__code', 'location', 'warehouse__name']
     ordering_fields = ['quantity', 'total_amount', 'updated_at']
 
 
@@ -301,10 +363,10 @@ class AssetAssignmentViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin,
                              viewsets.GenericViewSet):
     """Просмотр закреплений активов."""
     queryset = AssetAssignment.objects.select_related(
-        'asset', 'asset__category', 'asset__group', 'user', 'assigned_by',
+        'asset', 'asset__category', 'asset__group', 'user', 'assigned_by', 'warehouse',
     ).all()
     serializer_class = AssetAssignmentSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [CanViewWarehouse]
     filterset_class = AssignmentFilter
     search_fields = ['asset__name', 'user__last_name']
     ordering_fields = ['assigned_at', 'status']
@@ -314,10 +376,47 @@ class StockMovementViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin,
                            viewsets.GenericViewSet):
     """Просмотр журнала движения активов."""
     queryset = StockMovement.objects.select_related(
-        'asset', 'asset__category', 'asset__group', 'from_user', 'to_user', 'performed_by',
+        'asset', 'asset__category', 'asset__group', 'from_user', 'to_user', 'performed_by', 'warehouse',
     ).all()
     serializer_class = StockMovementSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [CanViewWarehouse]
     filterset_class = MovementFilter
     search_fields = ['asset__name', 'comment']
     ordering_fields = ['performed_at', 'total_amount']
+
+
+class StockAlertRuleViewSet(viewsets.ModelViewSet):
+    """Настройки критических остатков."""
+
+    queryset = StockAlertRule.objects.prefetch_related(
+        'recipients', 'groups', 'assets', 'warehouses', 'states',
+    ).all()
+    serializer_class = StockAlertRuleSerializer
+    permission_classes = [CanManageStockAlerts]
+    search_fields = ['name', 'message_template', 'assets__name', 'groups__name']
+    ordering_fields = ['name', 'threshold_quantity', 'updated_at']
+    ordering = ['name']
+
+    def perform_create(self, serializer):
+        rule = serializer.save()
+        StockAlertService.evaluate_rule(rule)
+
+    def perform_update(self, serializer):
+        rule = serializer.save()
+        StockAlertService.evaluate_rule(rule)
+
+
+class ActiveStockAlertView(APIView):
+    """Активные складские алармы текущего пользователя."""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        alerts = StockAlertState.objects.select_related(
+            'rule', 'stock', 'stock__asset', 'stock__warehouse',
+        ).filter(
+            is_active=True,
+            rule__is_active=True,
+            rule__recipients=request.user,
+        ).order_by('stock__asset__name').distinct()
+        return Response(ActiveStockAlertSerializer(alerts, many=True).data)

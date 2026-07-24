@@ -13,6 +13,7 @@ from django.db import transaction
 from apps.users.models import Department, User
 from apps.references.models import (
     Counterparty, LimitNorm, RequestType, AssetCategory, Asset,
+    Position, UnitOfMeasure, Warehouse,
 )
 from apps.assets.models import WarehouseStock
 from apps.common.constants import (
@@ -33,6 +34,7 @@ class Command(BaseCommand):
         self.stdout.write('═══ Наполнение справочников ═══')
 
         departments = self._seed_departments()
+        self._seed_reference_basics(departments)
         users = self._seed_users(departments)
         self._seed_counterparties()
         categories = self._seed_categories()
@@ -71,6 +73,63 @@ class Command(BaseCommand):
         return result
 
     # ─── Пользователи ────────────────────────────────────────────────
+
+    def _next_reference_code(self, model, prefix):
+        index = model.objects.filter(code__startswith=f'{prefix}-').count() + 1
+        while model.objects.filter(code=f'{prefix}-{index:04d}').exists():
+            index += 1
+        return f'{prefix}-{index:04d}'
+
+    def _ensure_position(self, name):
+        value = str(name or '').strip()
+        if not value:
+            return None
+        position = Position.objects.filter(name__iexact=value).first()
+        if position:
+            return position
+        return Position.objects.create(name=value, code=self._next_reference_code(Position, 'POS'))
+
+    def _ensure_unit(self, name):
+        value = str(name or '').strip()
+        if not value:
+            return None
+        unit = UnitOfMeasure.objects.filter(name__iexact=value).first()
+        if unit:
+            return unit
+        return UnitOfMeasure.objects.create(name=value, code=self._next_reference_code(UnitOfMeasure, 'UOM'))
+
+    def _ensure_warehouse(self, name, department=None):
+        value = str(name or '').strip()
+        if not value:
+            return None
+        warehouse = Warehouse.objects.filter(name__iexact=value).first()
+        if warehouse:
+            return warehouse
+        return Warehouse.objects.create(
+            name=value,
+            code=self._next_reference_code(Warehouse, 'WH'),
+            department=department,
+        )
+
+    def _seed_reference_basics(self, depts):
+        for name in [
+            'шт', 'комплект', 'упаковка', 'кг', 'л', 'м', 'м2', 'м3', 'рулон',
+            'пачка', 'коробка', 'лицензия', 'годовая подписка',
+        ]:
+            self._ensure_unit(name)
+        for name in [
+            'Системный администратор', 'Руководитель АХС', 'Специалист АХС',
+            'МОЛ по складу', 'МОЛ по НМА', 'Руководитель ФО',
+            'Директор ДИТ', 'Директор ЮД', 'Директор ИРД',
+            'Ведущий разработчик', 'Бухгалтер', 'Юрист',
+            'Специалист СБ', 'Член Рабочей комиссии', 'Специалист ИРД',
+        ]:
+            self._ensure_position(name)
+        self._ensure_warehouse('Основной склад', depts.get('АХС'))
+        self._ensure_warehouse('Склад ТМЗ', depts.get('АХС'))
+        self._ensure_warehouse('Склад ОС', depts.get('АХС'))
+        self._ensure_warehouse('Склад НМА', depts.get('ДИТ'))
+        self._ensure_warehouse('Серверное хранилище', depts.get('ДИТ'))
 
     def _seed_users(self, depts):
         self.stdout.write('  👤 Пользователи...')
@@ -130,11 +189,18 @@ class Command(BaseCommand):
                     'last_name': last,
                     'patronymic': patron,
                     'position': position,
+                    'position_ref': self._ensure_position(position),
                     'role': role,
                     'department': depts.get(dept_code),
                     'is_active': True,
                 },
             )
+            position_ref = self._ensure_position(position)
+            if position_ref and user.position_ref_id != position_ref.id:
+                user.position_ref = position_ref
+                user.position = position_ref.name
+                user.save(update_fields=['position_ref', 'position'])
+
             pw = 'Admin1234!' if username == 'admin' else 'Test1234!'
             user.set_password(pw)
             user.save(update_fields=['password'])
@@ -311,6 +377,7 @@ class Command(BaseCommand):
                     'asset_type': ASSET_TYPE_TMZ,
                     'category': cats[cat_code],
                     'unit_of_measure': unit,
+                    'unit_of_measure_ref': self._ensure_unit(unit),
                     'unit_price': Decimal(str(price)),
                     'is_long_term_use': False,
                 },
@@ -337,6 +404,7 @@ class Command(BaseCommand):
                         'asset_type': ASSET_TYPE_OS,
                         'category': cats[cat_code],
                         'unit_of_measure': unit,
+                        'unit_of_measure_ref': self._ensure_unit(unit),
                         'unit_price': Decimal(str(price)),
                         'is_long_term_use': False,
                         'inventory_number': inv,
@@ -360,6 +428,7 @@ class Command(BaseCommand):
                     'asset_type': ASSET_TYPE_NMA,
                     'category': cats[cat_code],
                     'unit_of_measure': unit,
+                    'unit_of_measure_ref': self._ensure_unit(unit),
                     'unit_price': Decimal(str(price)),
                     'is_long_term_use': False,
                     'inventory_number': inv,
@@ -470,6 +539,7 @@ class Command(BaseCommand):
                         'quantity': Decimal(str(qty)),
                         'total_amount': Decimal(str(qty)) * asset.unit_price,
                         'location': 'Основной склад',
+                        'warehouse': self._ensure_warehouse('Основной склад'),
                     },
                 )
                 if created:
@@ -488,6 +558,7 @@ class Command(BaseCommand):
                         'quantity': Decimal('1'),
                         'total_amount': asset.unit_price,
                         'location': 'Основной склад',
+                        'warehouse': self._ensure_warehouse('Основной склад'),
                     },
                 )
                 if created:
@@ -504,6 +575,7 @@ class Command(BaseCommand):
                         'quantity': Decimal('10'),
                         'total_amount': Decimal('10') * asset.unit_price,
                         'location': 'Серверное хранилище',
+                        'warehouse': self._ensure_warehouse('Серверное хранилище'),
                     },
                 )
                 if created:

@@ -7,6 +7,8 @@
   last_name: string;
   patronymic: string;
   position: string;
+  position_ref: number | null;
+  position_ref_name: string;
   department: number | null;
   department_name: string;
   phone: string;
@@ -51,10 +53,13 @@ export type RequestStatus =
 
 export type DocumentStatus =
   | 'DRAFT'
+  | 'PENDING_AHS_APPROVAL'
+  | 'PENDING_CHANGE_APPROVAL'
   | 'PENDING_SIGNATURE'
   | 'PARTIALLY_SIGNED'
   | 'SIGNED'
   | 'SENT_FOR_REVISION'
+  | 'REJECTED'
   | 'CANCELLED';
 
 export interface Department {
@@ -76,6 +81,22 @@ export interface Counterparty {
   phone: string;
   email: string;
   is_active: boolean;
+  contracts_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Contract {
+  id: number;
+  name: string;
+  contract_date: string;
+  valid_until: string;
+  counterparty: number;
+  counterparty_name: string;
+  counterparty_bin: string;
+  pdf_file: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface Asset {
@@ -89,6 +110,8 @@ export interface Asset {
   group: number | null;
   group_name: string;
   unit_of_measure: string;
+  unit_of_measure_ref: number | null;
+  unit_of_measure_ref_name: string;
   unit_price: string;
   is_long_term_use: boolean;
   inventory_number: string | null;
@@ -96,6 +119,11 @@ export interface Asset {
   useful_life_months: number | null;
   depreciation_rate: string | null;
   stock_quantity: string;
+  stock_total_amount: string;
+  stock_balance_date: string | null;
+  stock_location: string;
+  warehouse: number | null;
+  warehouse_name: string;
   source_1c_id: string | null;
   last_sync_at: string | null;
   created_at: string;
@@ -118,6 +146,8 @@ export interface WarehouseStock {
   quantity: string;
   total_amount: string;
   balance_date: string | null;
+  warehouse: number | null;
+  warehouse_name: string;
   location: string;
   updated_at: string;
 }
@@ -139,6 +169,10 @@ export interface AssetRequest {
   approvals: RequestApproval[];
   issue_responsibles: number[];
   issue_responsible_names: string[];
+  deletion_requested: boolean;
+  deletion_requested_by: number | null;
+  deletion_requested_by_name: string;
+  deletion_requested_at: string | null;
   pending_my_approval: boolean;
   pending_my_issue: boolean;
   required_approver_role: UserRole | null;
@@ -195,6 +229,8 @@ export interface StockMovement {
   to_user_name: string;
   performed_by: number | null;
   performed_by_name: string;
+  warehouse: number | null;
+  warehouse_name: string;
   performed_at: string;
   comment: string;
 }
@@ -218,6 +254,8 @@ export interface AssetAssignment {
   assigned_at: string;
   assigned_by: number | null;
   assigned_by_name: string;
+  warehouse: number | null;
+  warehouse_name: string;
   location: string;
   status: string;
   status_display: string;
@@ -238,6 +276,44 @@ export interface Notification {
   created_at: string;
   related_model: string;
   related_object_id: number | null;
+}
+
+export interface StockAlertRule {
+  id: number;
+  name: string;
+  is_active: boolean;
+  threshold_quantity: string;
+  recipients: number[];
+  recipient_names: string[];
+  groups: number[];
+  group_names: string[];
+  assets: number[];
+  asset_names: string[];
+  warehouses: number[];
+  warehouse_names: string[];
+  message_template: string;
+  active_alert_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ActiveStockAlert {
+  id: number;
+  rule: number;
+  rule_name: string;
+  asset: number;
+  asset_name: string;
+  asset_code: string;
+  asset_type: AssetType;
+  unit_of_measure: string;
+  warehouse: number | null;
+  warehouse_name: string;
+  current_quantity: string;
+  threshold_quantity: string;
+  message: string;
+  suggested_quantity: string;
+  action_url: string;
+  triggered_at: string;
 }
 
 export interface AssetCategory {
@@ -374,7 +450,7 @@ export interface UserAccessOverride {
 
 export interface EffectiveAccessPermission extends AccessPermissionDefinition {
   allowed: boolean;
-  source: 'none' | 'role' | 'position_allow' | 'position_deny' | 'user_grant' | 'user_deny';
+  source: 'none' | 'role' | 'manager' | 'position_allow' | 'position_deny' | 'user_grant' | 'user_deny';
 }
 
 export interface EffectiveUserAccess {

@@ -17,7 +17,18 @@ class RequestFilter(django_filters.FilterSet):
     created_before = django_filters.DateFilter(
         field_name='created_at', lookup_expr='date__lte',
     )
+    deletion_requested = django_filters.BooleanFilter(method='filter_deletion_requested')
+
+    def filter_deletion_requested(self, queryset, name, value):
+        if value is True:
+            return queryset.filter(deletion_requested_at__isnull=False)
+        if value is False:
+            return queryset.filter(deletion_requested_at__isnull=True)
+        return queryset
 
     class Meta:
         model = AssetRequest
-        fields = ['status', 'request_type', 'initiator', 'asset_type', 'created_after', 'created_before']
+        fields = [
+            'status', 'request_type', 'initiator', 'asset_type',
+            'created_after', 'created_before', 'deletion_requested',
+        ]

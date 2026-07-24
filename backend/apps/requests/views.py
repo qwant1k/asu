@@ -1,6 +1,7 @@
 ﻿"""Views заявок ИС «АСУ»."""
 
 from django.db.models import Q
+from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
@@ -9,8 +10,8 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
 from apps.common.constants import (
+    REQUEST_APPROVED_SUPERVISOR,
     REQUEST_DRAFT,
-    ROLE_ADMIN,
     ROLE_AHS_HEAD,
     ROLE_AHS_WORKER,
 )
@@ -41,7 +42,7 @@ class AssetRequestViewSet(viewsets.ModelViewSet):
         qs = AssetRequest.objects.select_related(
             'request_type', 'initiator', 'initiator__department',
             'initiator__department__head', 'initiator__supervisor',
-            'from_user', 'to_user',
+            'from_user', 'to_user', 'deletion_requested_by',
         ).prefetch_related(
             'items',
             'items__asset',
@@ -52,8 +53,8 @@ class AssetRequestViewSet(viewsets.ModelViewSet):
             'approvals__approver',
         )
 
-        # Администратор и АХС видят весь журнал заявок.
-        if user.role in (ROLE_ADMIN, ROLE_AHS_WORKER, ROLE_AHS_HEAD) or has_access(user, 'requests.view_all'):
+        # Полный журнал доступен только управляющим/администраторам через право requests.view_all.
+        if has_access(user, 'requests.view_all'):
             return qs
 
         visibility_q = Q(initiator=user)
@@ -64,6 +65,11 @@ class AssetRequestViewSet(viewsets.ModelViewSet):
         # или как непосредственный руководитель сотрудника.
         visibility_q |= Q(initiator__department__head=user)
         visibility_q |= Q(initiator__supervisor=user)
+        visibility_q |= Q(issue_responsibles=user)
+
+        # Руководитель АХС без статуса управляющего видит заявки только на своем этапе согласования.
+        if has_access(user, 'requests.approve_ahs'):
+            visibility_q |= Q(status=REQUEST_APPROVED_SUPERVISOR)
 
         return qs.filter(visibility_q).distinct()
 
@@ -96,11 +102,31 @@ class AssetRequestViewSet(viewsets.ModelViewSet):
         serializer.save()
 
     def perform_destroy(self, instance):
-        if instance.initiator_id != self.request.user.id:
-            raise ValidationError({'detail': _('Удалить заявку может только инициатор')})
-        if instance.status != REQUEST_DRAFT:
-            raise ValidationError({'detail': _('Удалить можно только черновик')})
-        instance.delete()
+        if has_access(self.request.user, 'system.admin'):
+            instance.delete()
+            return
+        raise ValidationError({'detail': _('Полное удаление доступно только администратору. Пометьте заявку на удаление.')})
+
+    @action(detail=True, methods=['post'], url_path='mark-for-deletion')
+    def mark_for_deletion(self, request, pk=None):
+        request_obj = self.get_object()
+        if has_access(request.user, 'system.admin'):
+            return Response(
+                {'detail': _('Администратор может удалить заявку напрямую')},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if request_obj.initiator_id != request.user.id:
+            return Response(
+                {'detail': _('Пометить на удаление может только инициатор заявки')},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        if request_obj.deletion_requested_at:
+            return Response({'detail': _('Заявка уже помечена на удаление')})
+
+        request_obj.deletion_requested_by = request.user
+        request_obj.deletion_requested_at = timezone.now()
+        request_obj.save(update_fields=['deletion_requested_by', 'deletion_requested_at', 'updated_at'])
+        return Response({'detail': _('Заявка помечена на удаление')})
 
     @action(detail=True, methods=['post'])
     def submit(self, request, pk=None):

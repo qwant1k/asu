@@ -62,18 +62,19 @@ const MovementsPage: React.FC = () => {
       {loading ? <Spinner /> : (
         <Surface>
           <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 800 }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 900 }}>
               <thead><tr>
                 <Th>{t('common.date')}</Th><Th>{t('common.type')}</Th><Th>{t('common.asset')}</Th>
-                <Th right>{t('references.quantity')}</Th><Th>{t('common.comment')}</Th><Th>{t('common.performer')}</Th>
+                <Th>Склад</Th><Th right>{t('references.quantity')}</Th><Th>{t('common.comment')}</Th><Th>{t('common.performer')}</Th>
               </tr></thead>
               <tbody>
-                {data.length === 0 ? <tr><td colSpan={6}><EmptyState text={t('common.noData')} /></td></tr> :
+                {data.length === 0 ? <tr><td colSpan={7}><EmptyState text={t('common.noData')} /></td></tr> :
                   data.map((r: any) => (
                     <tr key={r.id} onMouseEnter={(e) => hoverRow(e, true)} onMouseLeave={(e) => hoverRow(e, false)}>
                       <Td muted>{r.performed_at ? new Date(r.performed_at).toLocaleString('ru-KZ') : '—'}</Td>
                       <Td><Badge status={r.movement_type_display} /></Td>
                       <Td><AssetLink assetId={r.asset}>{r.asset_name}</AssetLink></Td>
+                      <Td muted>{r.warehouse_name || '—'}</Td>
                       <Td right>{r.quantity}</Td>
                       <Td muted>{r.comment}</Td>
                       <Td muted>{r.performed_by_name}</Td>

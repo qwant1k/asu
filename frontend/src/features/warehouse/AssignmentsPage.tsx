@@ -67,16 +67,16 @@ const AssignmentsPage: React.FC = () => {
       {loading ? <Spinner /> : (
         <Surface>
           <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 700 }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 820 }}>
               <thead><tr>
-                <Th>{t('common.asset')}</Th><Th>{t('common.code')}</Th><Th>{t('references.assignedTo')}</Th>
+                <Th>{t('common.asset')}</Th><Th>{t('common.code')}</Th><Th>{t('references.assignedTo')}</Th><Th>Склад</Th>
                 <Th right>{t('references.quantity')}</Th><Th>{t('common.status')}</Th><Th>{t('common.date')}</Th>
               </tr></thead>
               <tbody>
-                {data.length === 0 ? <tr><td colSpan={6}><EmptyState text={t('common.noData')} /></td></tr> :
+                {data.length === 0 ? <tr><td colSpan={7}><EmptyState text={t('common.noData')} /></td></tr> :
                   data.map((r: any) => (
                     <tr key={r.id} onMouseEnter={(e) => hoverRow(e, true)} onMouseLeave={(e) => hoverRow(e, false)}>
-                      <Td><AssetLink assetId={r.asset}>{r.asset_name}</AssetLink></Td><Td muted>{r.asset_code}</Td><Td>{r.user_name}</Td>
+                      <Td><AssetLink assetId={r.asset}>{r.asset_name}</AssetLink></Td><Td muted>{r.asset_code}</Td><Td>{r.user_name}</Td><Td muted>{r.warehouse_name || r.location || '—'}</Td>
                       <Td right>{r.quantity}</Td><Td><Badge status={r.status_display} /></Td>
                       <Td muted>{r.assigned_at ? new Date(r.assigned_at).toLocaleDateString('ru-KZ') : '—'}</Td>
                     </tr>

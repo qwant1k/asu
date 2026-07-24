@@ -15,7 +15,7 @@ class UserAdmin(BaseUserAdmin):
     search_fields = ['username', 'first_name', 'last_name', 'email']
     fieldsets = BaseUserAdmin.fieldsets + (
         (_('Дополнительная информация'), {
-            'fields': ('patronymic', 'position', 'department', 'phone', 'role', 'supervisor'),
+            'fields': ('patronymic', 'position_ref', 'position', 'department', 'phone', 'role', 'supervisor'),
         }),
     )
 

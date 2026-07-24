@@ -13,7 +13,7 @@ import {
   UserAddOutlined,
 } from '@ant-design/icons';
 import api from '../../api/axios';
-import type { Department, PaginatedResponse, User, UserRole } from '../../shared/types';
+import type { Department, PaginatedResponse, Position, User, UserRole } from '../../shared/types';
 import {
   C, PageHeader, Th, Td, Badge, Spinner, EmptyState, Modal, Btn,
   InputField, SelectField, Drawer, Popconfirm, StatCard, hoverRow, Surface, FilterBar,
@@ -55,6 +55,7 @@ const UsersAdminPage: React.FC = () => {
   const [viewItem, setViewItem] = useState<User | null>(null);
   const [editItem, setEditItem] = useState<User | null>(null);
   const [departments, setDepartments] = useState<Department[]>([]);
+  const [positions, setPositions] = useState<Position[]>([]);
   const [supervisors, setSupervisors] = useState<User[]>([]);
   const [saving, setSaving] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
@@ -104,15 +105,18 @@ const UsersAdminPage: React.FC = () => {
 
   const fetchReferences = useCallback(async () => {
     try {
-      const [deptRes, usersRes] = await Promise.all([
+      const [deptRes, usersRes, positionRes] = await Promise.all([
         api.get<PaginatedResponse<Department>>('/departments/', { params: { page_size: 500, ordering: 'name' } }),
         api.get<PaginatedResponse<User>>('/users/', { params: { page_size: 500, is_active: true, ordering: 'last_name' } }),
+        api.get<PaginatedResponse<Position>>('/references/positions/', { params: { page_size: 500, is_active: true, ordering: 'name' } }),
       ]);
       setDepartments(deptRes.data.results || []);
       setSupervisors(usersRes.data.results || []);
+      setPositions(positionRes.data.results || []);
     } catch {
       setDepartments([]);
       setSupervisors([]);
+      setPositions([]);
     }
   }, []);
 
@@ -134,7 +138,7 @@ const UsersAdminPage: React.FC = () => {
     setFPatronymic(user?.patronymic || '');
     setFEmail(user?.email || '');
     setFPhone(user?.phone || '');
-    setFPosition(user?.position || '');
+    setFPosition(user?.position_ref ? String(user.position_ref) : '');
     setFDepartment(user?.department ? String(user.department) : '');
     setFSupervisor(user?.supervisor ? String(user.supervisor) : '');
     setFRole(user?.role || 'USER');
@@ -175,7 +179,7 @@ const UsersAdminPage: React.FC = () => {
         patronymic: fPatronymic,
         email: fEmail,
         phone: fPhone,
-        position: fPosition,
+        position_ref: fPosition ? Number(fPosition) : null,
         department: fDepartment ? Number(fDepartment) : null,
         supervisor: fSupervisor ? Number(fSupervisor) : null,
         role: fRole,
@@ -267,6 +271,7 @@ const UsersAdminPage: React.FC = () => {
   const totalPages = Math.ceil(total / PAGE_SIZE);
   const roleOptions = ROLE_OPTIONS.map((role) => ({ value: role, label: t(`roles.${role}`, role) }));
   const departmentOptions = departments.map((dept) => ({ value: dept.id, label: `${dept.name} (${dept.code})` }));
+  const positionOptions = positions.map((position) => ({ value: position.id, label: position.name }));
   const supervisorOptions = supervisors
     .filter((user) => !editItem || user.id !== editItem.id)
     .map((user) => ({ value: user.id, label: user.full_name || user.username }));
@@ -352,7 +357,7 @@ const UsersAdminPage: React.FC = () => {
                           {user.full_name || user.username}
                         </button>
                         <div style={{ fontSize: 11, color: C.muted, marginTop: 3 }}>{user.username}</div>
-                        {user.position && <div style={{ fontSize: 11, color: C.secondary, marginTop: 3 }}>{user.position}</div>}
+                        {(user.position_ref_name || user.position) && <div style={{ fontSize: 11, color: C.secondary, marginTop: 3 }}>{user.position_ref_name || user.position}</div>}
                       </Td>
                       <Td>
                         <div style={{ fontSize: 12, color: C.text }}>{user.email || '—'}</div>
@@ -412,7 +417,8 @@ const UsersAdminPage: React.FC = () => {
             <InputField label="Имя *" value={fFirst} onChange={(e) => setFFirst(e.target.value)} />
           </div>
           <InputField label="Отчество" value={fPatronymic} onChange={(e) => setFPatronymic(e.target.value)} />
-          <InputField label="Должность" value={fPosition} onChange={(e) => setFPosition(e.target.value)} />
+          <SelectField label="Должность" value={fPosition} onChange={(e) => setFPosition(e.target.value)}
+            options={[{ value: '', label: '— не выбрано —' }, ...positionOptions]} />
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
             <InputField label="Email" type="email" value={fEmail} onChange={(e) => setFEmail(e.target.value)} />
             <InputField label="Телефон" value={fPhone} onChange={(e) => setFPhone(e.target.value)} />
@@ -441,7 +447,7 @@ const UsersAdminPage: React.FC = () => {
               ['Логин', viewItem.username],
               ['Email', viewItem.email || '—'],
               ['Телефон', viewItem.phone || '—'],
-              ['Должность', viewItem.position || '—'],
+              ['Должность', viewItem.position_ref_name || viewItem.position || '—'],
               ['Подразделение', viewItem.department_name || '—'],
               ['Руководитель', viewItem.supervisor_name || '—'],
               ['Дата регистрации', new Date(viewItem.date_joined).toLocaleString('ru-KZ')],

@@ -29,6 +29,7 @@ class AccessDefinition:
 
 ACCESS_DEFINITIONS = [
     AccessDefinition('system.admin', 'Администрирование системы', 'Система', 'Доступ к административному разделу приложения.'),
+    AccessDefinition('system.manager', 'Статус управляющий', 'Система', 'Полный интерфейс управления учетом, справочниками, заявками, пользователями и контрагентами.'),
     AccessDefinition('users.manage', 'Управление сотрудниками', 'Сотрудники', 'Создание, изменение, блокировка пользователей и пароли.'),
     AccessDefinition('access.manage', 'Управление правами', 'Сотрудники', 'Настройка прав по должностям и индивидуальных исключений.'),
     AccessDefinition('references.manage', 'Редактирование справочников', 'Справочники', 'Создание и изменение справочных данных.'),
@@ -48,52 +49,40 @@ ACCESS_DEFINITIONS = [
 ACCESS_DEFINITION_MAP = {item.code: item for item in ACCESS_DEFINITIONS}
 ACCESS_PERMISSION_CHOICES = [(item.code, item.name) for item in ACCESS_DEFINITIONS]
 ALL_ACCESS_CODES = tuple(item.code for item in ACCESS_DEFINITIONS)
+MANAGER_ACCESS_CODE = 'system.manager'
+MANAGER_GRANTED_ACCESS = {
+    'users.manage',
+    'access.manage',
+    'references.manage',
+    'requests.view_all',
+    'warehouse.view',
+    'warehouse.upload',
+    'inventory.view_all',
+    'documents.manage',
+    'reports.view',
+    'integrations.sync',
+}
 
 ROLE_DEFAULT_ACCESS = {
     ROLE_ADMIN: set(ALL_ACCESS_CODES),
     ROLE_AHS_HEAD: {
-        'system.admin',
-        'references.manage',
         'requests.create',
-        'requests.view_all',
         'requests.approve_ahs',
         'requests.issue',
-        'warehouse.view',
-        'inventory.view_all',
-        'documents.manage',
-        'reports.view',
     },
     ROLE_AHS_WORKER: {
-        'references.manage',
         'requests.create',
-        'requests.view_all',
         'requests.issue',
-        'warehouse.view',
-        'inventory.view_all',
-        'documents.manage',
-        'reports.view',
     },
     ROLE_MOL_WAREHOUSE: {
         'requests.create',
-        'requests.view_all',
-        'warehouse.view',
-        'warehouse.upload',
-        'inventory.view_all',
-        'documents.manage',
-        'reports.view',
     },
     ROLE_MOL_NMA: {
         'requests.create',
-        'requests.view_all',
-        'warehouse.view',
-        'warehouse.upload',
-        'inventory.view_all',
-        'documents.manage',
-        'reports.view',
     },
-    ROLE_FO_HEAD: {'requests.create', 'requests.view_all', 'reports.view'},
+    ROLE_FO_HEAD: {'requests.create'},
     ROLE_DEPT_HEAD: {'requests.create', 'requests.approve_department'},
-    ROLE_COMMISSION_MEMBER: {'requests.create', 'documents.manage'},
+    ROLE_COMMISSION_MEMBER: {'requests.create'},
     ROLE_IRD_WORKER: {'requests.create'},
     ROLE_USER: {'requests.create'},
 }
@@ -109,6 +98,13 @@ APPROVER_ROLE_ACCESS = {
 
 def normalize_position(value: str | None) -> str:
     return ' '.join((value or '').strip().casefold().split())
+
+
+def user_position_name(user) -> str:
+    position_ref = getattr(user, 'position_ref', None)
+    if position_ref:
+        return position_ref.name
+    return getattr(user, 'position', '') or ''
 
 
 def role_access_codes(user) -> set[str]:
@@ -127,7 +123,7 @@ def effective_access_codes(user) -> set[str]:
         return set(ALL_ACCESS_CODES)
 
     codes = role_access_codes(user)
-    normalized_position = normalize_position(getattr(user, 'position', ''))
+    normalized_position = normalize_position(user_position_name(user))
 
     if normalized_position:
         from .models import PositionAccessRule
@@ -151,6 +147,9 @@ def effective_access_codes(user) -> set[str]:
         else:
             codes.discard(override.permission_code)
 
+    if MANAGER_ACCESS_CODE in codes:
+        codes.update(MANAGER_GRANTED_ACCESS)
+
     return codes
 
 
@@ -167,7 +166,8 @@ def effective_access_detail(user) -> dict:
     """Return effective permissions with their source for admin UI."""
     effective = effective_access_codes(user)
     role_codes = role_access_codes(user)
-    normalized_position = normalize_position(getattr(user, 'position', ''))
+    manager_enabled = MANAGER_ACCESS_CODE in effective
+    normalized_position = normalize_position(user_position_name(user))
     position_rules = {}
     user_overrides = {}
 
@@ -199,6 +199,8 @@ def effective_access_detail(user) -> dict:
             source = 'position_allow' if position_rules[code] else 'position_deny'
         if code in user_overrides:
             source = 'user_grant' if user_overrides[code] == UserAccessOverride.MODE_GRANT else 'user_deny'
+        if manager_enabled and code in MANAGER_GRANTED_ACCESS and code in effective:
+            source = 'manager'
         items.append({
             'code': code,
             'name': definition.name,
@@ -209,7 +211,7 @@ def effective_access_detail(user) -> dict:
         })
     return {
         'user': user.id,
-        'position': getattr(user, 'position', ''),
+        'position': user_position_name(user),
         'normalized_position': normalized_position,
         'permissions': items,
     }

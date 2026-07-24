@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   CheckCircleFilled,
   CloseCircleFilled,
+  DownloadOutlined,
   MinusCircleOutlined,
   ReloadOutlined,
   SaveOutlined,
@@ -39,8 +40,9 @@ type AccessState = 'inherit' | 'allow' | 'deny';
 type AdminAccessTab = 'positions' | 'employees' | 'roles';
 
 const SOURCE_LABELS: Record<string, string> = {
-  none: 'Нет доступа',
+  none: 'Нет правила',
   role: 'По роли',
+  manager: 'По статусу управляющего',
   position_allow: 'Разрешено по должности',
   position_deny: 'Запрещено по должности',
   user_grant: 'Разрешено индивидуально',
@@ -65,10 +67,10 @@ const ROLE_LABELS: Record<UserRole, string> = {
   IRD_WORKER: 'ИРД/ОСМР',
 };
 
-const STATE_META: Record<AccessState, { label: string; color: string; bg: string; icon: React.ReactNode }> = {
-  deny: { label: 'Запретить', color: C.danger, bg: C.dangerBg, icon: <CloseCircleFilled /> },
-  inherit: { label: 'Как у роли', color: C.secondary, bg: C.tagBg, icon: <MinusCircleOutlined /> },
-  allow: { label: 'Разрешить', color: C.success, bg: C.successBg, icon: <CheckCircleFilled /> },
+const STATE_META: Record<AccessState, { actionLabel: string; stateLabel: string; color: string; bg: string; border: string; icon: React.ReactNode }> = {
+  deny: { actionLabel: 'Запретить', stateLabel: 'Запрещено', color: C.danger, bg: C.dangerBg, border: C.danger, icon: <CloseCircleFilled /> },
+  inherit: { actionLabel: 'Не указывать', stateLabel: 'Не указано', color: C.secondary, bg: C.tagBg, border: C.inputBorder, icon: <MinusCircleOutlined /> },
+  allow: { actionLabel: 'Разрешить', stateLabel: 'Активно', color: C.success, bg: C.successBg, border: C.success, icon: <CheckCircleFilled /> },
 };
 
 function normalize(value: string) {
@@ -86,7 +88,7 @@ function AccessToggle({ value, onChange }: { value: AccessState; onChange: (v: A
             key={opt}
             type="button"
             onClick={() => onChange(opt)}
-            title={meta.label}
+            title={meta.actionLabel}
             style={{
               width: 30,
               height: 26,
@@ -111,6 +113,54 @@ function AccessToggle({ value, onChange }: { value: AccessState; onChange: (v: A
   );
 }
 
+function AccessStateIndicator({ state }: { state: AccessState }) {
+  const meta = STATE_META[state];
+  return (
+    <div
+      title={meta.stateLabel}
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 7,
+        minWidth: 112,
+        padding: '5px 9px',
+        borderRadius: 999,
+        border: `1px solid ${meta.border}`,
+        background: meta.bg,
+        color: meta.color,
+        fontSize: 12,
+        fontWeight: 750,
+        whiteSpace: 'nowrap',
+      }}
+    >
+      <span
+        style={{
+          width: 18,
+          height: 18,
+          borderRadius: 6,
+          border: `1px solid ${meta.border}`,
+          background: state === 'inherit' ? C.white : meta.bg,
+          color: meta.color,
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          fontSize: 12,
+          lineHeight: 1,
+        }}
+      >
+        {meta.icon}
+      </span>
+      {meta.stateLabel}
+    </div>
+  );
+}
+
+function getEffectiveAccessState(access: EffectiveUserAccess['permissions'][number] | undefined): AccessState {
+  if (access?.allowed) return 'allow';
+  if (access?.source === 'position_deny' || access?.source === 'user_deny') return 'deny';
+  return 'inherit';
+}
+
 const AdminAccessPage: React.FC = () => {
   const [definitions, setDefinitions] = useState<AccessPermissionDefinition[]>([]);
   const [roleDefaults, setRoleDefaults] = useState<Record<string, string[]>>({});
@@ -119,6 +169,7 @@ const AdminAccessPage: React.FC = () => {
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [exportingMatrix, setExportingMatrix] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
 
   const [activeTab, setActiveTab] = useState<AdminAccessTab>('positions');
@@ -365,7 +416,33 @@ const AdminAccessPage: React.FC = () => {
     }
   };
 
-  const renderPermissionGroups = (matrix: Record<string, AccessState>, setMatrix: React.Dispatch<React.SetStateAction<Record<string, AccessState>>>) => {
+  const handleExportAccessMatrix = async () => {
+    setExportingMatrix(true);
+    setErrorMsg('');
+    try {
+      const res = await api.get('/users/access/matrix/export/', { responseType: 'blob' });
+      const url = window.URL.createObjectURL(new Blob([res.data], {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      }));
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `access_matrix_${new Date().toISOString().slice(0, 10)}.xlsx`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (err: any) {
+      setErrorMsg(err?.response?.data?.detail || 'Не удалось сформировать матрицу доступа');
+    } finally {
+      setExportingMatrix(false);
+    }
+  };
+
+  const renderPermissionGroups = (
+    matrix: Record<string, AccessState>,
+    setMatrix: React.Dispatch<React.SetStateAction<Record<string, AccessState>>>,
+    options?: { effectiveAccess?: EffectiveUserAccess | null; settingLabel?: string },
+  ) => {
     const entries = Object.entries(groupedDefinitions);
     if (entries.length === 0) return <EmptyState text="Ничего не найдено" />;
     return entries.map(([category, items]) => (
@@ -374,30 +451,61 @@ const AdminAccessPage: React.FC = () => {
           {category}
         </div>
         <div style={{ display: 'grid', gap: 6 }}>
-          {items.map((def) => (
-            <div
-              key={def.code}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                gap: 12,
-                padding: '9px 12px',
-                borderRadius: C.radiusSm,
-                border: `1px solid ${C.rowBorder}`,
-                background: C.surfaceSolid,
-              }}
-            >
-              <div style={{ minWidth: 0 }}>
-                <div style={{ fontSize: 13, fontWeight: 650, color: C.heading }}>{def.name}</div>
-                {def.description && <div style={{ fontSize: 11, color: C.muted, marginTop: 2, lineHeight: 1.35 }}>{def.description}</div>}
+          {items.map((def) => {
+            const state = matrix[def.code] || 'inherit';
+            const effectiveItem = options?.effectiveAccess?.permissions.find((p) => p.code === def.code);
+            const effectiveState = effectiveItem ? getEffectiveAccessState(effectiveItem) : null;
+            const visualState = effectiveState || state;
+            const source = effectiveItem?.source || 'none';
+            return (
+              <div
+                key={def.code}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: 14,
+                  padding: '10px 12px',
+                  borderRadius: C.radiusSm,
+                  border: `1px solid ${STATE_META[visualState].border}`,
+                  background: visualState === 'inherit' ? C.surfaceSolid : STATE_META[visualState].bg,
+                  boxShadow: visualState === 'inherit' ? 'none' : C.shadowInset,
+                }}
+              >
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div style={{ fontSize: 13, fontWeight: 650, color: C.heading }}>{def.name}</div>
+                  {def.description && <div style={{ fontSize: 11, color: C.muted, marginTop: 2, lineHeight: 1.35 }}>{def.description}</div>}
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                  {effectiveState && (
+                    <div style={{ display: 'grid', gap: 3, justifyItems: 'end' }}>
+                      <span style={{ fontSize: 10, color: C.muted, fontWeight: 750, textTransform: 'uppercase', letterSpacing: 0 }}>
+                        Текущий итог
+                      </span>
+                      <AccessStateIndicator state={effectiveState} />
+                      {source !== 'none' && (
+                        <span style={{ fontSize: 10, color: C.secondary, maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {SOURCE_LABELS[source]}
+                        </span>
+                      )}
+                    </div>
+                  )}
+                  <div style={{ display: 'grid', gap: 3, justifyItems: 'end' }}>
+                    <span style={{ fontSize: 10, color: C.muted, fontWeight: 750, textTransform: 'uppercase', letterSpacing: 0 }}>
+                      {options?.settingLabel || 'Настройка'}
+                    </span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      {(!effectiveState || state !== 'inherit') && <AccessStateIndicator state={state} />}
+                      <AccessToggle
+                        value={state}
+                        onChange={(v) => setMatrix((prev) => ({ ...prev, [def.code]: v }))}
+                      />
+                    </div>
+                  </div>
+                </div>
               </div>
-              <AccessToggle
-                value={matrix[def.code] || 'inherit'}
-                onChange={(v) => setMatrix((prev) => ({ ...prev, [def.code]: v }))}
-              />
-            </div>
-          ))}
+            );
+          })}
         </div>
       </div>
     ));
@@ -586,7 +694,10 @@ const AdminAccessPage: React.FC = () => {
                     <Badge status={selectedUser?.role || 'USER'} />
                     <span style={{ fontSize: 12, color: C.secondary }}>{selectedUser?.position || 'Должность не указана'}</span>
                   </div>
-                  {renderPermissionGroups(userMatrix, setUserMatrix)}
+                  {renderPermissionGroups(userMatrix, setUserMatrix, {
+                    effectiveAccess,
+                    settingLabel: 'Индивидуально',
+                  })}
                   <InputField
                     label="Комментарий"
                     value={userComment}
@@ -600,53 +711,30 @@ const AdminAccessPage: React.FC = () => {
                 </>
               )}
             </Panel>
-
-            {selectedUserId && effectiveAccess && (
-              <Panel title="Итоговый доступ" subtitle="Финальный результат с учётом роли, должности и индивидуальных правил.">
-                <div style={{ display: 'grid', gap: 14 }}>
-                  {Object.entries(groupedDefinitions).map(([category, items]) => (
-                    <div key={category}>
-                      <div style={{ fontSize: 11, fontWeight: 800, color: C.muted, textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 6 }}>{category}</div>
-                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 8 }}>
-                        {items.map((def) => {
-                          const access = effectiveAccess.permissions.find((p) => p.code === def.code);
-                          const source = access?.source || 'none';
-                          return (
-                            <div
-                              key={def.code}
-                              title={SOURCE_LABELS[source]}
-                              style={{
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'space-between',
-                                gap: 8,
-                                padding: '8px 10px',
-                                borderRadius: C.radiusSm,
-                                border: `1px solid ${C.rowBorder}`,
-                                background: access?.allowed ? C.successBg : C.tagBg,
-                              }}
-                            >
-                              <span style={{ fontSize: 12, color: C.heading, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{def.name}</span>
-                              {access?.allowed
-                                ? <CheckCircleFilled style={{ color: C.success, flexShrink: 0 }} />
-                                : <CloseCircleFilled style={{ color: C.muted, flexShrink: 0 }} />}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </Panel>
-            )}
           </div>
         </div>
       )}
 
       {activeTab === 'roles' && (
         <Surface>
-          <div style={{ padding: '15px 16px', borderBottom: `1px solid ${C.rowBorder}`, fontWeight: 800, color: C.heading }}>
-            Права по умолчанию для каждой роли
+          <div style={{
+            padding: '15px 16px',
+            borderBottom: `1px solid ${C.rowBorder}`,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 12,
+            flexWrap: 'wrap',
+          }}>
+            <div>
+              <div style={{ fontWeight: 800, color: C.heading }}>Права по умолчанию для каждой роли</div>
+              <div style={{ fontSize: 12, color: C.secondary, marginTop: 3 }}>
+                Матрица включает роли, должности, индивидуальные права и итоговый доступ сотрудников.
+              </div>
+            </div>
+            <Btn variant="secondary" onClick={handleExportAccessMatrix} loading={exportingMatrix}>
+              <DownloadOutlined /> Скачать матрицу
+            </Btn>
           </div>
           <div style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 960 }}>

@@ -86,6 +86,14 @@ class IncomingInvoice(BaseDocument):
         related_name='incoming_invoices_as_mol',
         verbose_name=_('МОЛ'),
     )
+    warehouse = models.ForeignKey(
+        'references.Warehouse',
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name='incoming_invoices',
+        verbose_name=_('Склад'),
+    )
 
     class Meta:
         verbose_name = _('Приходная накладная')

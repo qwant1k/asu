@@ -31,6 +31,14 @@ class WarehouseStock(TimestampMixin):
     balance_date = models.DateField(
         _('Дата остатка'), blank=True, null=True,
     )
+    warehouse = models.ForeignKey(
+        'references.Warehouse',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='stock_items',
+        verbose_name=_('Склад'),
+    )
     location = models.CharField(
         _('Место хранения'), max_length=255, blank=True, default='',
     )
@@ -41,6 +49,11 @@ class WarehouseStock(TimestampMixin):
 
     def __str__(self):
         return f'{self.asset.name} — {self.quantity} {self.asset.unit_of_measure}'
+
+    def save(self, *args, **kwargs):
+        if self.warehouse_id:
+            self.location = self.warehouse.name
+        super().save(*args, **kwargs)
 
     def recalculate_total(self):
         """Пересчёт общей суммы на основе количества и цены актива."""
@@ -72,6 +85,14 @@ class AssetAssignment(models.Model):
         null=True,
         related_name='assignments_issued',
         verbose_name=_('Выдал'),
+    )
+    warehouse = models.ForeignKey(
+        'references.Warehouse',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='asset_assignments',
+        verbose_name=_('Склад'),
     )
     location = models.CharField(
         _('Местоположение'), max_length=255, blank=True, default='',
@@ -150,6 +171,14 @@ class StockMovement(models.Model):
         verbose_name=_('Выполнил'),
     )
     performed_at = models.DateTimeField(_('Дата операции'), auto_now_add=True)
+    warehouse = models.ForeignKey(
+        'references.Warehouse',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='stock_movements',
+        verbose_name=_('Склад'),
+    )
     comment = models.TextField(_('Комментарий'), blank=True, default='')
 
     class Meta:
@@ -168,3 +197,92 @@ class StockMovement(models.Model):
         if not self.total_amount:
             self.total_amount = self.quantity * self.unit_price
         super().save(*args, **kwargs)
+
+
+class StockAlertRule(TimestampMixin):
+    """Правило контроля критического остатка на складе."""
+
+    name = models.CharField(_('Наименование'), max_length=255)
+    is_active = models.BooleanField(_('Активно'), default=True)
+    threshold_quantity = models.DecimalField(
+        _('Критическое количество'),
+        max_digits=12,
+        decimal_places=2,
+        default=0,
+    )
+    recipients = models.ManyToManyField(
+        settings.AUTH_USER_MODEL,
+        related_name='stock_alert_rules',
+        verbose_name=_('Получатели'),
+    )
+    groups = models.ManyToManyField(
+        'references.AssetCategory',
+        blank=True,
+        related_name='stock_alert_rules',
+        verbose_name=_('Группы товаров'),
+    )
+    assets = models.ManyToManyField(
+        'references.Asset',
+        blank=True,
+        related_name='stock_alert_rules',
+        verbose_name=_('Индивидуальные товары'),
+    )
+    warehouses = models.ManyToManyField(
+        'references.Warehouse',
+        blank=True,
+        related_name='stock_alert_rules',
+        verbose_name=_('Склады'),
+    )
+    message_template = models.CharField(
+        _('Шаблон сообщения'),
+        max_length=500,
+        blank=True,
+        default='{asset_name} на исходе, требуется срочное пополнение склада. Остаток: {quantity} {unit}.',
+    )
+
+    class Meta:
+        verbose_name = _('Настройка аларма остатка')
+        verbose_name_plural = _('Настройки алармов остатков')
+        ordering = ['name']
+
+    def __str__(self):
+        return self.name
+
+
+class StockAlertState(models.Model):
+    """Активное срабатывание правила контроля остатка."""
+
+    rule = models.ForeignKey(
+        StockAlertRule,
+        on_delete=models.CASCADE,
+        related_name='states',
+        verbose_name=_('Правило'),
+    )
+    stock = models.ForeignKey(
+        WarehouseStock,
+        on_delete=models.CASCADE,
+        related_name='alert_states',
+        verbose_name=_('Остаток'),
+    )
+    is_active = models.BooleanField(_('Активно'), default=True)
+    current_quantity = models.DecimalField(
+        _('Текущее количество'),
+        max_digits=12,
+        decimal_places=2,
+        default=0,
+    )
+    message = models.TextField(_('Сообщение'), blank=True, default='')
+    triggered_at = models.DateTimeField(_('Сработало'), auto_now_add=True)
+    last_notified_at = models.DateTimeField(_('Последнее уведомление'), null=True, blank=True)
+    resolved_at = models.DateTimeField(_('Закрыто'), null=True, blank=True)
+
+    class Meta:
+        verbose_name = _('Срабатывание аларма остатка')
+        verbose_name_plural = _('Срабатывания алармов остатков')
+        ordering = ['-triggered_at']
+        constraints = [
+            models.UniqueConstraint(fields=['rule', 'stock'], name='unique_stock_alert_rule_state'),
+        ]
+
+    def __str__(self):
+        return f'{self.rule.name}: {self.stock.asset.name}'

@@ -1,5 +1,6 @@
 ﻿import re
 
+from django.core.exceptions import ObjectDoesNotExist
 from django.utils.translation import gettext_lazy as _
 from rest_framework import serializers
 
@@ -11,15 +12,18 @@ from .codegen import (
     ensure_unique_code,
     normalize_reference_code,
 )
-from .models import Asset, AssetCategory, Counterparty, LimitNorm, Position, RequestType, UnitOfMeasure, Warehouse
+from .models import Asset, AssetCategory, Contract, Counterparty, LimitNorm, Position, RequestType, UnitOfMeasure, Warehouse
 
 
 class CounterpartySerializer(serializers.ModelSerializer):
+    contracts_count = serializers.IntegerField(read_only=True, default=0)
+
     class Meta:
         model = Counterparty
         fields = [
             'id', 'name', 'bin', 'address', 'contact_person',
             'phone', 'email', 'is_active', 'created_at', 'updated_at',
+            'contracts_count',
         ]
         read_only_fields = ['created_at', 'updated_at']
 
@@ -32,6 +36,32 @@ class CounterpartySerializer(serializers.ModelSerializer):
         if qs.exists():
             raise serializers.ValidationError(_('Контрагент с таким БИН уже существует.'))
         return value
+
+
+class ContractSerializer(serializers.ModelSerializer):
+    counterparty_name = serializers.CharField(source='counterparty.name', read_only=True)
+    counterparty_bin = serializers.CharField(source='counterparty.bin', read_only=True)
+
+    class Meta:
+        model = Contract
+        fields = [
+            'id', 'name', 'contract_date', 'valid_until',
+            'counterparty', 'counterparty_name', 'counterparty_bin',
+            'pdf_file', 'created_at', 'updated_at',
+        ]
+        read_only_fields = ['created_at', 'updated_at']
+
+    def validate_pdf_file(self, value):
+        if value and not value.name.lower().endswith('.pdf'):
+            raise serializers.ValidationError(_('Загрузите файл в формате PDF.'))
+        return value
+
+    def validate(self, attrs):
+        contract_date = attrs.get('contract_date') or (self.instance and self.instance.contract_date)
+        valid_until = attrs.get('valid_until') or (self.instance and self.instance.valid_until)
+        if contract_date and valid_until and valid_until < contract_date:
+            raise serializers.ValidationError({'valid_until': _('Срок действия не может быть раньше даты договора.')})
+        return attrs
 
 
 class LimitNormSerializer(serializers.ModelSerializer):
@@ -151,24 +181,70 @@ class AssetCategorySerializer(serializers.ModelSerializer):
 class AssetSerializer(serializers.ModelSerializer):
     category_name = serializers.CharField(source='category.name', read_only=True)
     group_name = serializers.CharField(source='group.name', read_only=True, default='')
+    unit_of_measure = serializers.CharField(required=False, allow_blank=True)
+    unit_of_measure_ref_name = serializers.CharField(source='unit_of_measure_ref.name', read_only=True, default='')
     asset_type_display = serializers.CharField(source='get_asset_type_display', read_only=True)
     stock_quantity = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True, default=0)
+    stock_total_amount = serializers.SerializerMethodField()
+    stock_balance_date = serializers.SerializerMethodField()
+    stock_location = serializers.SerializerMethodField()
+    warehouse = serializers.SerializerMethodField()
+    warehouse_name = serializers.SerializerMethodField()
 
     class Meta:
         model = Asset
         fields = [
             'id', 'name', 'code', 'asset_type', 'asset_type_display',
             'category', 'category_name', 'group', 'group_name',
-            'unit_of_measure', 'unit_price',
+            'unit_of_measure', 'unit_of_measure_ref', 'unit_of_measure_ref_name', 'unit_price',
             'is_long_term_use', 'inventory_number', 'balance_date',
             'useful_life_months', 'depreciation_rate',
             'source_1c_id', 'last_sync_at', 'created_at', 'updated_at',
-            'stock_quantity',
+            'stock_quantity', 'stock_total_amount', 'stock_balance_date',
+            'stock_location', 'warehouse', 'warehouse_name',
         ]
         read_only_fields = ['source_1c_id', 'last_sync_at', 'created_at', 'updated_at']
         extra_kwargs = {
             'code': {'required': False, 'allow_blank': True, 'validators': []},
         }
+
+    def _stock(self, obj):
+        try:
+            return obj.warehouse_stock
+        except ObjectDoesNotExist:
+            return None
+
+    def get_stock_total_amount(self, obj):
+        stock = self._stock(obj)
+        return str(stock.total_amount) if stock else '0.00'
+
+    def get_stock_balance_date(self, obj):
+        stock = self._stock(obj)
+        return stock.balance_date.isoformat() if stock and stock.balance_date else None
+
+    def get_stock_location(self, obj):
+        stock = self._stock(obj)
+        return stock.location if stock else ''
+
+    def get_warehouse(self, obj):
+        stock = self._stock(obj)
+        return stock.warehouse_id if stock else None
+
+    def get_warehouse_name(self, obj):
+        stock = self._stock(obj)
+        return stock.warehouse.name if stock and stock.warehouse_id else ''
+
+    def _sync_unit(self, attrs):
+        if 'unit_of_measure_ref' in attrs:
+            unit_ref = attrs.get('unit_of_measure_ref')
+            attrs['unit_of_measure'] = unit_ref.name if unit_ref else ''
+        elif attrs.get('unit_of_measure'):
+            unit_name = attrs.get('unit_of_measure', '').strip()
+            unit_ref = UnitOfMeasure.objects.filter(name__iexact=unit_name).first()
+            if unit_ref:
+                attrs['unit_of_measure_ref'] = unit_ref
+                attrs['unit_of_measure'] = unit_ref.name
+        return attrs
 
     def validate_inventory_number(self, value):
         if not value:
@@ -192,6 +268,10 @@ class AssetSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({'category': _('Категория должна соответствовать типу актива.')})
         if group and group.asset_type != base_type:
             raise serializers.ValidationError({'group': _('Группа должна соответствовать типу актива.')})
+        unit = attrs.get('unit_of_measure') or (self.instance and self.instance.unit_of_measure)
+        unit_ref = attrs.get('unit_of_measure_ref') if 'unit_of_measure_ref' in attrs else (self.instance and self.instance.unit_of_measure_ref)
+        if not unit and not unit_ref:
+            raise serializers.ValidationError({'unit_of_measure_ref': _('Выберите единицу измерения.')})
 
         prefix = code_prefix(asset_type)
         code = normalize_reference_code(
@@ -204,6 +284,12 @@ class AssetSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({'code': _('Актив с таким кодом уже существует.')})
         attrs['code'] = code
         return attrs
+
+    def create(self, validated_data):
+        return super().create(self._sync_unit(validated_data))
+
+    def update(self, instance, validated_data):
+        return super().update(instance, self._sync_unit(validated_data))
 
 
 class UnitOfMeasureSerializer(serializers.ModelSerializer):

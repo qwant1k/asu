@@ -4,6 +4,7 @@ from django.urls import path
 from rest_framework.routers import DefaultRouter
 
 from .views import (
+    AccessMatrixExportView,
     AccessDefinitionView,
     EffectiveUserAccessView,
     PositionAccessRuleViewSet,
@@ -21,4 +22,5 @@ router.register('', UserViewSet, basename='users')
 urlpatterns = [
     path('access/definitions/', AccessDefinitionView.as_view(), name='access-definitions'),
     path('access/effective/<int:user_id>/', EffectiveUserAccessView.as_view(), name='access-effective'),
+    path('access/matrix/export/', AccessMatrixExportView.as_view(), name='access-matrix-export'),
 ] + router.urls

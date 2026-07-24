@@ -107,12 +107,23 @@ class AssetRequestListSerializer(PendingMyApprovalMixin, serializers.ModelSerial
     status_display = serializers.CharField(source='get_status_display', read_only=True)
     issue_responsibles = serializers.PrimaryKeyRelatedField(many=True, read_only=True)
     issue_responsible_names = serializers.SerializerMethodField()
+    deletion_requested = serializers.SerializerMethodField()
+    deletion_requested_by_name = serializers.SerializerMethodField()
 
     def get_issue_responsible_names(self, obj):
         return [
             user.get_short_name() or user.username
             for user in obj.issue_responsibles.all()
         ]
+
+    def get_deletion_requested(self, obj):
+        return bool(obj.deletion_requested_at)
+
+    def get_deletion_requested_by_name(self, obj):
+        user = obj.deletion_requested_by
+        if not user:
+            return ''
+        return user.get_full_name() or user.username
 
     class Meta:
         model = AssetRequest
@@ -121,6 +132,7 @@ class AssetRequestListSerializer(PendingMyApprovalMixin, serializers.ModelSerial
             'status', 'status_display', 'initiator', 'initiator_name',
             'pending_my_approval', 'pending_my_issue', 'required_approver_role',
             'issue_responsibles', 'issue_responsible_names', 'created_at', 'updated_at',
+            'deletion_requested', 'deletion_requested_by', 'deletion_requested_by_name', 'deletion_requested_at',
         ]
 
 
@@ -141,12 +153,23 @@ class AssetRequestDetailSerializer(PendingMyApprovalMixin, serializers.ModelSeri
     )
     issue_responsibles = serializers.PrimaryKeyRelatedField(many=True, read_only=True)
     issue_responsible_names = serializers.SerializerMethodField()
+    deletion_requested = serializers.SerializerMethodField()
+    deletion_requested_by_name = serializers.SerializerMethodField()
 
     def get_issue_responsible_names(self, obj):
         return [
             user.get_short_name() or user.username
             for user in obj.issue_responsibles.all()
         ]
+
+    def get_deletion_requested(self, obj):
+        return bool(obj.deletion_requested_at)
+
+    def get_deletion_requested_by_name(self, obj):
+        user = obj.deletion_requested_by
+        if not user:
+            return ''
+        return user.get_full_name() or user.username
 
     class Meta:
         model = AssetRequest
@@ -160,6 +183,7 @@ class AssetRequestDetailSerializer(PendingMyApprovalMixin, serializers.ModelSeri
             'issue_responsibles', 'issue_responsible_names',
             'pending_my_approval', 'pending_my_issue', 'required_approver_role',
             'created_at', 'updated_at',
+            'deletion_requested', 'deletion_requested_by', 'deletion_requested_by_name', 'deletion_requested_at',
         ]
 
 
@@ -167,12 +191,13 @@ class AssetRequestCreateSerializer(serializers.ModelSerializer):
     """Сериализатор создания заявки."""
 
     items = AssetRequestItemSerializer(many=True)
+    client_created_at = serializers.DateTimeField(write_only=True, required=False)
 
     class Meta:
         model = AssetRequest
         fields = [
             'id', 'request_type', 'from_user', 'to_user',
-            'reason', 'items',
+            'reason', 'items', 'client_created_at',
         ]
 
     def validate(self, attrs):
@@ -206,13 +231,18 @@ class AssetRequestCreateSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         items_data = validated_data.pop('items')
+        client_created_at = validated_data.pop('client_created_at', None)
         request_obj = AssetRequest.objects.create(**validated_data)
+        if client_created_at:
+            request_obj.created_at = client_created_at
+            request_obj.save(update_fields=['created_at'])
         for item_data in items_data:
             AssetRequestItem.objects.create(request=request_obj, **item_data)
         return request_obj
 
     def update(self, instance, validated_data):
         items_data = validated_data.pop('items', None)
+        validated_data.pop('client_created_at', None)
 
         for attr, value in validated_data.items():
             setattr(instance, attr, value)

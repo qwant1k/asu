@@ -2,7 +2,7 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import api from '../../api/axios';
-import type { User, Department, PaginatedResponse, UserRole } from '../../shared/types';
+import type { User, Department, PaginatedResponse, Position, UserRole } from '../../shared/types';
 import {
   C, PageHeader, Btn, Th, Td, Badge as UBadge, Drawer, InputField, SelectField,
   Spinner, EmptyState, hoverRow, Popconfirm, Modal, Surface, FilterBar,
@@ -28,6 +28,7 @@ const UsersPage: React.FC = () => {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [editItem, setEditItem] = useState<User | null>(null);
   const [departments, setDepartments] = useState<Department[]>([]);
+  const [positions, setPositions] = useState<Position[]>([]);
   const [supervisors, setSupervisors] = useState<User[]>([]);
   const [confirmItem, setConfirmItem] = useState<User | null>(null);
   const [resetItem, setResetItem] = useState<User | null>(null);
@@ -54,6 +55,13 @@ const UsersPage: React.FC = () => {
     } catch { /* */ }
   }, []);
 
+  const fetchPositions = useCallback(async () => {
+    try {
+      const res = await api.get<PaginatedResponse<Position>>('/references/positions/', { params: { page_size: 500, is_active: true, ordering: 'name' } });
+      setPositions(res.data.results || []);
+    } catch { setPositions([]); }
+  }, []);
+
   const fetchSupervisors = useCallback(async () => {
     try {
       const res = await api.get('/users/', { params: { role: 'DEPT_HEAD', page_size: 100 } });
@@ -74,7 +82,7 @@ const UsersPage: React.FC = () => {
     } catch { /* */ } finally { setLoading(false); }
   }, [page, search, filterDept, filterRole]);
 
-  useEffect(() => { fetchDepartments(); fetchSupervisors(); }, [fetchDepartments, fetchSupervisors]);
+  useEffect(() => { fetchDepartments(); fetchPositions(); fetchSupervisors(); }, [fetchDepartments, fetchPositions, fetchSupervisors]);
   useEffect(() => { fetchData(); }, [fetchData]);
 
   const resetForm = (u?: User) => {
@@ -85,7 +93,7 @@ const UsersPage: React.FC = () => {
     setFPatronymic(u?.patronymic || '');
     setFEmail(u?.email || '');
     setFPhone(u?.phone || '');
-    setFPosition(u?.position || '');
+    setFPosition(u?.position_ref ? String(u.position_ref) : '');
     setFDept(u?.department ? String(u.department) : '');
     setFRole(u?.role || 'USER');
     setFSupervisor(u?.supervisor ? String(u.supervisor) : '');
@@ -103,7 +111,8 @@ const UsersPage: React.FC = () => {
       const payload: Record<string, any> = {
         username: fUsername, last_name: fLastName, first_name: fFirstName,
         patronymic: fPatronymic, email: fEmail, phone: fPhone,
-        position: fPosition, role: fRole,
+        position_ref: fPosition ? Number(fPosition) : null,
+        role: fRole,
         department: fDept ? Number(fDept) : null,
         supervisor: fSupervisor ? Number(fSupervisor) : null,
       };
@@ -136,6 +145,7 @@ const UsersPage: React.FC = () => {
 
   const totalPages = Math.ceil(total / PAGE_SIZE);
   const deptOpts = [{ value: '', label: t('common.allDepartments') }, ...departments.map((d) => ({ value: String(d.id), label: d.name }))];
+  const positionOpts = [{ value: '', label: '— не выбрано —' }, ...positions.map((p) => ({ value: p.id, label: p.name }))];
   const roleOpts = [{ value: '', label: t('common.allRoles') }, ...ROLE_OPTIONS.map((r) => ({ value: r, label: t(`roles.${r}`) }))];
 
   return (
@@ -179,7 +189,7 @@ const UsersPage: React.FC = () => {
                         {r.full_name}
                       </button>
                     </Td>
-                    <Td muted>{r.position}</Td>
+                    <Td muted>{r.position_ref_name || r.position}</Td>
                     <Td muted>{r.department_name}</Td>
                     <Td><UBadge status={r.role} /></Td>
                     <Td><UBadge status={r.is_active ? t('common.active') : t('common.inactive')} /></Td>
@@ -233,7 +243,8 @@ const UsersPage: React.FC = () => {
           <InputField label={t('profile.patronymic')} value={fPatronymic} onChange={(e) => setFPatronymic(e.target.value)} />
           <InputField label={t('profile.email')} value={fEmail} onChange={(e) => setFEmail(e.target.value)} />
           <InputField label={t('profile.phone')} value={fPhone} onChange={(e) => setFPhone(e.target.value)} />
-          <InputField label={t('profile.position')} value={fPosition} onChange={(e) => setFPosition(e.target.value)} />
+          <SelectField label={t('profile.position')} value={fPosition} onChange={(e) => setFPosition(e.target.value)}
+            options={positionOpts} />
           <SelectField label={t('profile.department')} value={fDept} onChange={(e) => setFDept(e.target.value)}
             options={[{ value: '', label: '— не выбрано —' }, ...departments.map((d) => ({ value: d.id, label: d.name }))]} />
           <SelectField label={t('profile.role') + ' *'} value={fRole} onChange={(e) => setFRole(e.target.value)}

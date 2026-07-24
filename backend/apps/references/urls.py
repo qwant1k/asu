@@ -6,6 +6,7 @@ from .views import (
     ApprovalStepViewSet,
     AssetCategoryViewSet,
     AssetViewSet,
+    ContractViewSet,
     CounterpartyViewSet,
     LimitNormViewSet,
     PositionViewSet,
@@ -18,6 +19,7 @@ app_name = 'references'
 
 router = DefaultRouter()
 router.register('counterparties', CounterpartyViewSet, basename='counterparties')
+router.register('contracts', ContractViewSet, basename='contracts')
 router.register('limit-norms', LimitNormViewSet, basename='limit-norms')
 router.register('request-types', RequestTypeViewSet, basename='request-types')
 router.register('approval-steps', ApprovalStepViewSet, basename='approval-steps')

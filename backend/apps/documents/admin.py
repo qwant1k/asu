@@ -18,7 +18,7 @@ class IncomingInvoiceItemInline(admin.TabularInline):
 
 @admin.register(IncomingInvoice)
 class IncomingInvoiceAdmin(admin.ModelAdmin):
-    list_display = ['number', 'date', 'status', 'asset_type', 'counterparty', 'created_at']
+    list_display = ['number', 'date', 'status', 'asset_type', 'counterparty', 'warehouse', 'created_at']
     list_filter = ['status', 'asset_type']
     inlines = [IncomingInvoiceItemInline]
 

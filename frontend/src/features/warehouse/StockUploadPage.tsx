@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
@@ -12,6 +12,7 @@ import {
 import api from '../../api/axios';
 import { C, PageHeader, Btn, Panel, InputField, SelectField, Badge } from '../../shared/ui/primitives';
 import { toLocalDateInputValue } from '../../shared/utils/date';
+import type { PaginatedResponse, Warehouse } from '../../shared/types';
 
 interface UploadResult {
   success: boolean;
@@ -41,6 +42,8 @@ const StockUploadPage: React.FC = () => {
   const navigate = useNavigate();
   const [assetType, setAssetType] = useState<'TMZ' | 'OS'>('TMZ');
   const [balanceDate, setBalanceDate] = useState<string>(() => toLocalDateInputValue());
+  const [warehouse, setWarehouse] = useState('');
+  const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   const [file, setFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<UploadResult | null>(null);
@@ -51,6 +54,18 @@ const StockUploadPage: React.FC = () => {
     const sizeKb = Math.max(1, Math.round(file.size / 1024));
     return `${file.name} · ${sizeKb} KB`;
   }, [file]);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await api.get<PaginatedResponse<Warehouse>>('/references/warehouses/', {
+          params: { page_size: 500, is_active: true, ordering: 'name' },
+        });
+        setWarehouses(res.data.results || []);
+        if (!warehouse && res.data.results?.length) setWarehouse(String(res.data.results[0].id));
+      } catch { setWarehouses([]); }
+    })();
+  }, [warehouse]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -64,6 +79,7 @@ const StockUploadPage: React.FC = () => {
       const formData = new FormData();
       formData.append('file', file);
       formData.append('balance_date', balanceDate);
+      if (warehouse) formData.append('warehouse', warehouse);
 
       const res = await api.post<UploadResult>(
         `/assets/upload-stock/?asset_type=${assetType}`,
@@ -112,6 +128,12 @@ const StockUploadPage: React.FC = () => {
                 type="date"
                 value={balanceDate}
                 onChange={(e) => setBalanceDate(e.target.value)}
+              />
+              <SelectField
+                label={t('nav.warehouses')}
+                value={warehouse}
+                onChange={(e) => setWarehouse(e.target.value)}
+                options={[{ value: '', label: '— из Excel —' }, ...warehouses.map((w) => ({ value: w.id, label: w.name }))]}
               />
             </div>
 

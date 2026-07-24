@@ -16,16 +16,31 @@ from .serializers import (
     IncomingInvoiceCreateSerializer,
     WriteOffActListSerializer, WriteOffActDetailSerializer,
     WriteOffActCreateSerializer,
-    PetitionListSerializer, PetitionDetailSerializer,
-    ProtocolListSerializer, ProtocolDetailSerializer,
-    InternalTransferListSerializer, InternalTransferDetailSerializer,
+    PetitionListSerializer, PetitionDetailSerializer, PetitionCreateSerializer,
+    ProtocolListSerializer, ProtocolDetailSerializer, ProtocolCreateSerializer,
+    InternalTransferListSerializer, InternalTransferDetailSerializer, InternalTransferCreateSerializer,
 )
 from .services import DocumentWorkflowService
 
 
 class CanManageDocuments(BasePermission):
     def has_permission(self, request, view):
-        return bool(request.user and request.user.is_authenticated and has_access(request.user, 'documents.manage'))
+        return bool(
+            request.user
+            and request.user.is_authenticated
+            and (
+                has_access(request.user, 'documents.manage')
+                or has_access(request.user, 'system.admin')
+                or (
+                    view.action in (
+                        'list', 'retrieve',
+                        'approve_ahs', 'reject_ahs', 'send_for_revision',
+                        'approve_change_request', 'reject_change_request',
+                    )
+                    and DocumentWorkflowService.can_approve_ahs(request.user)
+                )
+            )
+        )
 
 
 class DocumentSignMixin:
@@ -40,6 +55,77 @@ class DocumentSignMixin:
         try:
             DocumentWorkflowService.sign(document, request.user, role_label, is_acting)
             return Response({'detail': _('Документ подписан')})
+        except ValueError as e:
+            return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+    @action(detail=True, methods=['post'], url_path='submit-for-approval')
+    def submit_for_approval(self, request, pk=None):
+        """Отправить документ руководителю АХС на согласование."""
+        document = self.get_object()
+        try:
+            DocumentWorkflowService.submit_for_ahs_approval(document, request.user)
+            serializer = self.get_serializer(document)
+            return Response(serializer.data)
+        except ValueError as e:
+            return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+    @action(detail=True, methods=['post'], url_path='approve-ahs')
+    def approve_ahs(self, request, pk=None):
+        """Согласовать документ руководителем АХС."""
+        document = self.get_object()
+        comment = request.data.get('comment', '')
+        try:
+            DocumentWorkflowService.approve_ahs(document, request.user, comment)
+            serializer = self.get_serializer(document)
+            return Response(serializer.data)
+        except ValueError as e:
+            return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+    @action(detail=True, methods=['post'], url_path='reject-ahs')
+    def reject_ahs(self, request, pk=None):
+        """Отклонить документ руководителем АХС."""
+        document = self.get_object()
+        reason = request.data.get('reason', '')
+        try:
+            DocumentWorkflowService.reject_ahs(document, request.user, reason)
+            serializer = self.get_serializer(document)
+            return Response(serializer.data)
+        except ValueError as e:
+            return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+    @action(detail=True, methods=['post'], url_path='request-change')
+    def request_change(self, request, pk=None):
+        """Запросить изменение подписанного документа."""
+        document = self.get_object()
+        reason = request.data.get('reason', '')
+        try:
+            DocumentWorkflowService.request_change(document, request.user, reason)
+            serializer = self.get_serializer(document)
+            return Response(serializer.data)
+        except ValueError as e:
+            return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+    @action(detail=True, methods=['post'], url_path='approve-change-request')
+    def approve_change_request(self, request, pk=None):
+        """Разрешить изменение подписанного документа."""
+        document = self.get_object()
+        comment = request.data.get('comment', '')
+        try:
+            DocumentWorkflowService.approve_change_request(document, request.user, comment)
+            serializer = self.get_serializer(document)
+            return Response(serializer.data)
+        except ValueError as e:
+            return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+    @action(detail=True, methods=['post'], url_path='reject-change-request')
+    def reject_change_request(self, request, pk=None):
+        """Отклонить запрос на изменение подписанного документа."""
+        document = self.get_object()
+        reason = request.data.get('reason', '')
+        try:
+            DocumentWorkflowService.reject_change_request(document, request.user, reason)
+            serializer = self.get_serializer(document)
+            return Response(serializer.data)
         except ValueError as e:
             return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -72,7 +158,7 @@ class DocumentDateFilterMixin:
 class IncomingInvoiceViewSet(DocumentDateFilterMixin, DocumentSignMixin, viewsets.ModelViewSet):
     """CRUD + подписание приходных накладных."""
     queryset = IncomingInvoice.objects.select_related(
-        'counterparty', 'mol_warehouse', 'created_by',
+        'counterparty', 'mol_warehouse', 'warehouse', 'created_by',
     ).prefetch_related('items', 'items__asset').all()
     permission_classes = [CanManageDocuments]
     filterset_fields = ['status', 'asset_type']
@@ -124,6 +210,8 @@ class PetitionViewSet(DocumentDateFilterMixin, DocumentSignMixin, viewsets.Model
     def get_serializer_class(self):
         if self.action == 'list':
             return PetitionListSerializer
+        if self.action in ('create', 'update', 'partial_update'):
+            return PetitionCreateSerializer
         return PetitionDetailSerializer
 
     def perform_create(self, serializer):
@@ -145,6 +233,8 @@ class CommissionProtocolViewSet(DocumentDateFilterMixin, DocumentSignMixin, view
     def get_serializer_class(self):
         if self.action == 'list':
             return ProtocolListSerializer
+        if self.action in ('create', 'update', 'partial_update'):
+            return ProtocolCreateSerializer
         return ProtocolDetailSerializer
 
     def perform_create(self, serializer):
@@ -164,6 +254,8 @@ class InternalTransferInvoiceViewSet(DocumentDateFilterMixin, DocumentSignMixin,
     def get_serializer_class(self):
         if self.action == 'list':
             return InternalTransferListSerializer
+        if self.action in ('create', 'update', 'partial_update'):
+            return InternalTransferCreateSerializer
         return InternalTransferDetailSerializer
 
     def perform_create(self, serializer):

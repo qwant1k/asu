@@ -402,10 +402,16 @@ class RequestWorkflowService:
     @staticmethod
     @transaction.atomic
     def cancel(request_obj: AssetRequest, user):
-        if request_obj.status != REQUEST_DRAFT:
+        is_admin = has_access(user, 'system.admin')
+        if is_admin:
+            if request_obj.status == REQUEST_EXECUTED:
+                raise ValueError(_('Нельзя отменить уже выданную заявку'))
+            if request_obj.status == REQUEST_CANCELLED:
+                raise ValueError(_('Заявка уже отменена'))
+        elif request_obj.status != REQUEST_DRAFT:
             raise ValueError(_('Отменить можно только черновик'))
 
-        if request_obj.initiator != user:
+        if not is_admin and request_obj.initiator != user:
             raise ValueError(_('Отменить заявку может только инициатор'))
 
         request_obj.status = REQUEST_CANCELLED

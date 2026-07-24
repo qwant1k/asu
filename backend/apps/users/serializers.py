@@ -2,8 +2,23 @@
 from django.utils.translation import gettext_lazy as _
 from rest_framework import serializers
 
+from apps.references.models import Position
+
 from .access import ACCESS_DEFINITIONS, effective_access_codes
 from .models import Department, PositionAccessRule, User, UserAccessOverride
+
+
+def sync_position_from_reference(validated_data):
+    if 'position_ref' in validated_data:
+        position_ref = validated_data.get('position_ref')
+        validated_data['position'] = position_ref.name if position_ref else ''
+    elif 'position' in validated_data and validated_data.get('position'):
+        position_name = validated_data.get('position', '').strip()
+        position_ref = Position.objects.filter(name__iexact=position_name).first()
+        if position_ref:
+            validated_data['position_ref'] = position_ref
+            validated_data['position'] = position_ref.name
+    return validated_data
 
 
 class DepartmentSerializer(serializers.ModelSerializer):
@@ -24,6 +39,7 @@ class UserSerializer(serializers.ModelSerializer):
     short_name = serializers.CharField(source='get_short_name', read_only=True)
     photo = serializers.ImageField(read_only=True)
     department_name = serializers.CharField(source='department.name', read_only=True, default='')
+    position_ref_name = serializers.CharField(source='position_ref.name', read_only=True, default='')
     supervisor_name = serializers.CharField(source='supervisor.get_short_name', read_only=True, default='')
     effective_permissions = serializers.SerializerMethodField()
 
@@ -38,6 +54,8 @@ class UserSerializer(serializers.ModelSerializer):
             'last_name',
             'patronymic',
             'position',
+            'position_ref',
+            'position_ref_name',
             'department',
             'department_name',
             'phone',
@@ -60,6 +78,9 @@ class UserSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(_('Пользователь не может быть своим руководителем.'))
         return value
 
+    def update(self, instance, validated_data):
+        return super().update(instance, sync_position_from_reference(validated_data))
+
     def get_effective_permissions(self, obj):
         return sorted(effective_access_codes(obj))
 
@@ -81,6 +102,7 @@ class UserCreateSerializer(serializers.ModelSerializer):
             'last_name',
             'patronymic',
             'position',
+            'position_ref',
             'department',
             'phone',
             'role',
@@ -90,6 +112,7 @@ class UserCreateSerializer(serializers.ModelSerializer):
         ]
 
     def create(self, validated_data):
+        validated_data = sync_position_from_reference(validated_data)
         password = validated_data.pop('password')
         user = User(**validated_data)
         user.set_password(password)
@@ -110,6 +133,7 @@ class UserProfileSerializer(serializers.ModelSerializer):
     photo = serializers.ImageField(required=False, allow_null=True)
     remove_photo = serializers.BooleanField(write_only=True, required=False, default=False)
     department_name = serializers.CharField(source='department.name', read_only=True, default='')
+    position_ref_name = serializers.CharField(source='position_ref.name', read_only=True, default='')
     supervisor_name = serializers.CharField(source='supervisor.get_short_name', read_only=True, default='')
     effective_permissions = serializers.SerializerMethodField()
 
@@ -125,6 +149,8 @@ class UserProfileSerializer(serializers.ModelSerializer):
             'last_name',
             'patronymic',
             'position',
+            'position_ref',
+            'position_ref_name',
             'department',
             'department_name',
             'phone',
@@ -148,7 +174,7 @@ class UserProfileSerializer(serializers.ModelSerializer):
         if remove_photo and instance.photo:
             instance.photo.delete(save=False)
             instance.photo = None
-        return super().update(instance, validated_data)
+        return super().update(instance, sync_position_from_reference(validated_data))
 
 
 class DepartmentTreeSerializer(serializers.ModelSerializer):
