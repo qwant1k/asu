@@ -6,6 +6,8 @@ import type { Department, PaginatedResponse, Warehouse } from '../../shared/type
 import {
   C, PageHeader, Btn, Th, Td, Badge, Modal, InputField, TextAreaField, SelectField, Spinner, EmptyState, hoverRow, Popconfirm, Surface, FilterBar,
 } from '../../shared/ui/primitives';
+import { AnimatePresence } from '../../shared/ui/animated/animations';
+import AnimatedRow from '../../shared/ui/animated/AnimatedRow';
 
 const PAGE_SIZE = 20;
 
@@ -84,7 +86,7 @@ const WarehousesPage: React.FC = () => {
   };
 
   const handleDelete = async (r: Warehouse) => {
-    try { await api.delete(`/references/warehouses/${r.id}/`); fetchData(); } catch { /* ignore */ }
+    try { await api.delete(`/references/warehouses/${r.id}/`); setData((prev) => prev.filter((x) => x.id !== r.id)); setTotal((prev) => Math.max(0, prev - 1)); } catch { /* ignore */ }
     setDeleteItem(null);
   };
 
@@ -123,8 +125,9 @@ const WarehousesPage: React.FC = () => {
                 </tr>
               </thead>
               <tbody>
+                <AnimatePresence>
                 {data.map((r) => (
-                  <tr key={r.id} onMouseEnter={(e) => hoverRow(e, true)} onMouseLeave={(e) => hoverRow(e, false)}>
+                  <AnimatedRow key={r.id} onMouseEnter={(e) => hoverRow(e, true)} onMouseLeave={(e) => hoverRow(e, false)}>
                     <Td bold>{r.name}</Td>
                     <Td muted>{r.code}</Td>
                     <Td>{r.department_name || '—'}</Td>
@@ -136,8 +139,9 @@ const WarehousesPage: React.FC = () => {
                         <button onClick={() => setDeleteItem(r)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: C.danger, fontSize: 13 }}><DeleteOutlined /></button>
                       </div>
                     </Td>
-                  </tr>
+                  </AnimatedRow>
                 ))}
+                </AnimatePresence>
               </tbody>
             </table>
           </div>

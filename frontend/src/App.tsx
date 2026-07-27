@@ -4,7 +4,7 @@ import React, { useEffect } from 'react';
 import { Routes, Route, Navigate, useParams } from 'react-router-dom';
 import { useAppSelector, useAppDispatch } from './app/hooks';
 import { fetchCurrentUser } from './features/auth/authSlice';
-import { isManagerUser } from './shared/auth/access';
+import { hasAnyAccess, isManagerUser } from './shared/auth/access';
 
 import ProtectedRoute from './shared/components/ProtectedRoute';
 import AppLayout from './shared/components/AppLayout';
@@ -57,11 +57,18 @@ import ReportsPage from './features/reports/ReportsPage';
 import UsersAdminPage from './features/admin/UsersAdminPage';
 import AdminAccessPage from './features/admin/AdminAccessPage';
 import Sync1CPage from './features/admin/Sync1CPage';
+import TrashPage from './features/admin/TrashPage';
 
 const ManagerOnly: React.FC<{ children: React.ReactElement }> = ({ children }) => {
   const { user } = useAppSelector((state) => state.auth);
   if (!user) return null;
   return isManagerUser(user) ? children : <Navigate to="/requests" replace />;
+};
+
+const AccessOnly: React.FC<{ children: React.ReactElement; anyOf: string[] }> = ({ children, anyOf }) => {
+  const { user } = useAppSelector((state) => state.auth);
+  if (!user) return null;
+  return hasAnyAccess(user, anyOf) ? children : <Navigate to="/requests" replace />;
 };
 
 const DocumentsOnly: React.FC<{ children: React.ReactElement }> = ({ children }) => {
@@ -114,28 +121,28 @@ const App: React.FC = () => {
           <Route path="/profile/:id" element={<OwnProfileOnly><ProfilePage /></OwnProfileOnly>} />
 
           {/* Справочники */}
-          <Route path="/references" element={<ManagerOnly><ReferencesPage /></ManagerOnly>} />
-          <Route path="/references/counterparties" element={<ManagerOnly><CounterpartiesPage /></ManagerOnly>} />
-          <Route path="/references/counterparties/:id" element={<ManagerOnly><CounterpartyCardPage /></ManagerOnly>} />
-          <Route path="/references/contracts" element={<ManagerOnly><ContractsPage /></ManagerOnly>} />
-          <Route path="/references/limits" element={<ManagerOnly><LimitsPage /></ManagerOnly>} />
-          <Route path="/references/users" element={<ManagerOnly><UsersPage /></ManagerOnly>} />
-          <Route path="/references/departments" element={<ManagerOnly><DepartmentsPage /></ManagerOnly>} />
-          <Route path="/references/request-types" element={<ManagerOnly><RequestTypesPage /></ManagerOnly>} />
-          <Route path="/references/units-of-measure" element={<ManagerOnly><UnitsOfMeasurePage /></ManagerOnly>} />
-          <Route path="/references/warehouses" element={<ManagerOnly><WarehousesPage /></ManagerOnly>} />
-          <Route path="/references/positions" element={<ManagerOnly><PositionsPage /></ManagerOnly>} />
-          <Route path="/references/assets/:type" element={<ManagerOnly><AssetsListPage /></ManagerOnly>} />
+          <Route path="/references" element={<AccessOnly anyOf={['references.manage', 'warehouse.view']}><ReferencesPage /></AccessOnly>} />
+          <Route path="/references/counterparties" element={<AccessOnly anyOf={['references.manage']}><CounterpartiesPage /></AccessOnly>} />
+          <Route path="/references/counterparties/:id" element={<AccessOnly anyOf={['references.manage']}><CounterpartyCardPage /></AccessOnly>} />
+          <Route path="/references/contracts" element={<AccessOnly anyOf={['references.manage']}><ContractsPage /></AccessOnly>} />
+          <Route path="/references/limits" element={<AccessOnly anyOf={['references.manage']}><LimitsPage /></AccessOnly>} />
+          <Route path="/references/users" element={<AccessOnly anyOf={['users.manage']}><UsersPage /></AccessOnly>} />
+          <Route path="/references/departments" element={<AccessOnly anyOf={['references.manage']}><DepartmentsPage /></AccessOnly>} />
+          <Route path="/references/request-types" element={<AccessOnly anyOf={['references.manage']}><RequestTypesPage /></AccessOnly>} />
+          <Route path="/references/units-of-measure" element={<AccessOnly anyOf={['references.manage']}><UnitsOfMeasurePage /></AccessOnly>} />
+          <Route path="/references/warehouses" element={<AccessOnly anyOf={['references.manage']}><WarehousesPage /></AccessOnly>} />
+          <Route path="/references/positions" element={<AccessOnly anyOf={['references.manage']}><PositionsPage /></AccessOnly>} />
+          <Route path="/references/assets/:type" element={<AccessOnly anyOf={['references.manage', 'warehouse.view']}><AssetsListPage /></AccessOnly>} />
 
           {/* Карточка позиции (ОС/НМА/ТМЗ) */}
-          <Route path="/assets/:id" element={<ManagerOnly><AssetCardPage /></ManagerOnly>} />
+          <Route path="/assets/:id" element={<AccessOnly anyOf={['references.manage', 'warehouse.view']}><AssetCardPage /></AccessOnly>} />
 
           {/* Склад */}
-          <Route path="/warehouse/stock" element={<ManagerOnly><WarehouseStockPage /></ManagerOnly>} />
-          <Route path="/warehouse/stock/upload" element={<ManagerOnly><StockUploadPage /></ManagerOnly>} />
-          <Route path="/warehouse/stock-alerts" element={<ManagerOnly><StockAlertsPage /></ManagerOnly>} />
-          <Route path="/warehouse/movements" element={<ManagerOnly><MovementsPage /></ManagerOnly>} />
-          <Route path="/warehouse/assignments" element={<ManagerOnly><AssignmentsPage /></ManagerOnly>} />
+          <Route path="/warehouse/stock" element={<AccessOnly anyOf={['warehouse.view']}><WarehouseStockPage /></AccessOnly>} />
+          <Route path="/warehouse/stock/upload" element={<Navigate to="/admin/stock-upload" replace />} />
+          <Route path="/warehouse/stock-alerts" element={<AccessOnly anyOf={['warehouse.view']}><StockAlertsPage /></AccessOnly>} />
+          <Route path="/warehouse/movements" element={<AccessOnly anyOf={['warehouse.view']}><MovementsPage /></AccessOnly>} />
+          <Route path="/warehouse/assignments" element={<AccessOnly anyOf={['warehouse.view']}><AssignmentsPage /></AccessOnly>} />
 
           {/* Заявки */}
           <Route path="/requests" element={<RequestsPage />} />
@@ -162,23 +169,17 @@ const App: React.FC = () => {
           <Route path="/documents/internal-transfers/:id" element={<DocumentsOnly><DocumentListPage /></DocumentsOnly>} />
 
           {/* Инвентарные карты */}
-          <Route path="/inventory" element={<ManagerOnly><InventoryPage /></ManagerOnly>} />
+          <Route path="/inventory" element={<AccessOnly anyOf={['inventory.view_all']}><InventoryPage /></AccessOnly>} />
 
           {/* Отчёты */}
-          <Route path="/reports" element={<ManagerOnly><ReportsPage /></ManagerOnly>} />
-          <Route path="/reports/tmz-stock" element={<ManagerOnly><ReportsPage /></ManagerOnly>} />
-          <Route path="/reports/os-balance" element={<ManagerOnly><ReportsPage /></ManagerOnly>} />
-          <Route path="/reports/os-stock" element={<ManagerOnly><ReportsPage /></ManagerOnly>} />
-          <Route path="/reports/nma-balance" element={<ManagerOnly><ReportsPage /></ManagerOnly>} />
-          <Route path="/reports/movement" element={<ManagerOnly><ReportsPage /></ManagerOnly>} />
-          <Route path="/reports/write-offs" element={<ManagerOnly><ReportsPage /></ManagerOnly>} />
-          <Route path="/reports/request-journal" element={<ManagerOnly><ReportsPage /></ManagerOnly>} />
-          <Route path="/reports/inventory-report" element={<ManagerOnly><ReportsPage /></ManagerOnly>} />
+          <Route path="/reports/*" element={<AccessOnly anyOf={['reports.view']}><ReportsPage /></AccessOnly>} />
 
           {/* Администрирование */}
-          <Route path="/admin/users" element={<ManagerOnly><UsersAdminPage /></ManagerOnly>} />
-          <Route path="/admin/access" element={<ManagerOnly><AdminAccessPage /></ManagerOnly>} />
+          <Route path="/admin/users" element={<AccessOnly anyOf={['users.manage']}><UsersAdminPage /></AccessOnly>} />
+          <Route path="/admin/access" element={<AccessOnly anyOf={['access.manage']}><AdminAccessPage /></AccessOnly>} />
           <Route path="/admin/sync-1c" element={<ManagerOnly><Sync1CPage /></ManagerOnly>} />
+          <Route path="/admin/stock-upload" element={<AccessOnly anyOf={['system.admin']}><StockUploadPage /></AccessOnly>} />
+          <Route path="/admin/trash" element={<AccessOnly anyOf={['system.admin']}><TrashPage /></AccessOnly>} />
         </Route>
       </Route>
 

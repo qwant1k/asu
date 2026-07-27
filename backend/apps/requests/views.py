@@ -18,6 +18,7 @@ from apps.common.constants import (
 from apps.users.models import User
 from apps.users.access import has_access
 from apps.users.serializers import UserSerializer
+from apps.common.trash import SoftDeleteViewSetMixin, move_to_trash
 
 from .filters import RequestFilter
 from .models import AssetRequest
@@ -29,7 +30,7 @@ from .serializers import (
 from .services import RequestWorkflowService
 
 
-class AssetRequestViewSet(viewsets.ModelViewSet):
+class AssetRequestViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
     """ViewSet заявок с полным workflow."""
 
     permission_classes = [IsAuthenticated]
@@ -102,10 +103,25 @@ class AssetRequestViewSet(viewsets.ModelViewSet):
         serializer.save()
 
     def perform_destroy(self, instance):
-        if has_access(self.request.user, 'system.admin'):
-            instance.delete()
+        if (
+            instance.status == REQUEST_DRAFT
+            and (
+                instance.initiator_id == self.request.user.id
+                or has_access(self.request.user, 'system.admin')
+            )
+        ):
+            move_to_trash(
+                instance,
+                self.request.user,
+                self.request.data.get('reason', ''),
+            )
             return
-        raise ValidationError({'detail': _('Полное удаление доступно только администратору. Пометьте заявку на удаление.')})
+        raise ValidationError({
+            'detail': _(
+                'Физическое удаление допускается только для черновика. '
+                'Для зарегистрированной заявки используйте отмену или пометку.'
+            ),
+        })
 
     @action(detail=True, methods=['post'], url_path='mark-for-deletion')
     def mark_for_deletion(self, request, pk=None):
@@ -212,7 +228,7 @@ class AssetRequestViewSet(viewsets.ModelViewSet):
 
         try:
             RequestWorkflowService.confirm_receipt(request_obj, request.user)
-            return Response({'detail': _('Получение уже подтверждено фактом выдачи')})
+            return Response({'detail': _('Получение подтверждено инициатором')})
         except ValueError as e:
             return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 

@@ -6,8 +6,10 @@ from django.contrib import admin
 from django.urls import path, include
 from django.conf import settings
 from django.conf.urls.static import static
+from apps.common.views import health
 
 urlpatterns = [
+    path('health/', health, name='health'),
     path('admin/', admin.site.urls),
 
     # API v1
@@ -22,6 +24,7 @@ urlpatterns = [
     path('api/v1/reports/', include('apps.reports.urls', namespace='reports')),
     path('api/v1/notifications/', include('apps.notifications.urls', namespace='notifications')),
     path('api/v1/integrations/', include('apps.integrations.urls', namespace='integrations')),
+    path('api/v1/', include('apps.common.urls')),
 ]
 
 if settings.DEBUG:

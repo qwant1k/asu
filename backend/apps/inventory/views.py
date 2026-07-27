@@ -19,7 +19,7 @@ FULL_ACCESS_ROLES = (ROLE_ADMIN, ROLE_AHS_WORKER, ROLE_AHS_HEAD)
 
 def get_inventory_queryset(request):
     user = request.user
-    target_user_id = request.query_params.get('user_id')
+    target_user_id = request.query_params.get('mol_id') or request.query_params.get('user_id')
     asset_type = request.query_params.get('asset_type')
     category = request.query_params.get('category')
     group = request.query_params.get('group')
@@ -30,7 +30,9 @@ def get_inventory_queryset(request):
 
     has_full_access = user.role in FULL_ACCESS_ROLES or has_access(user, 'inventory.view_all')
 
-    if target_user_id and int(target_user_id) != user.id and not has_full_access:
+    if target_user_id and not str(target_user_id).isdigit():
+        raise ValueError(_('Некорректный идентификатор МОЛ'))
+    if target_user_id and str(target_user_id) != str(user.id) and not has_full_access:
         raise PermissionError
 
     qs = AssetAssignment.objects.select_related(
@@ -68,6 +70,8 @@ def get_inventory_queryset(request):
             Q(asset__inventory_number__icontains=search) |
             Q(user__first_name__icontains=search) |
             Q(user__last_name__icontains=search) |
+            Q(user__patronymic__icontains=search) |
+            Q(user__username__icontains=search) |
             Q(user__department__name__icontains=search)
         )
 
@@ -87,6 +91,8 @@ class InventoryCardView(APIView):
                 {'detail': _('Недостаточно прав для просмотра карт других сотрудников')},
                 status=status.HTTP_403_FORBIDDEN,
             )
+        except ValueError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
         serializer = AssetAssignmentSerializer(qs, many=True)
         return Response({
@@ -109,6 +115,8 @@ class InventoryCardExportView(APIView):
                 {'detail': _('Недостаточно прав для просмотра карт других сотрудников')},
                 status=status.HTTP_403_FORBIDDEN,
             )
+        except ValueError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
         serializer = AssetAssignmentSerializer(qs, many=True)
         columns = [
@@ -130,3 +138,33 @@ class InventoryCardExportView(APIView):
             rows=serializer.data,
             summary=[('Всего записей', qs.count())],
         )
+
+
+class InventoryMolOptionsView(APIView):
+    """Список МОЛ (сотрудников с действующими закреплениями) для фильтров."""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        from apps.users.models import User
+
+        can_view_all = (
+            request.user.role in FULL_ACCESS_ROLES
+            or has_access(request.user, 'inventory.view_all')
+            or has_access(request.user, 'warehouse.view')
+            or has_access(request.user, 'system.admin')
+        )
+        users = User.objects.filter(
+            is_active=True,
+            asset_assignments__status=ASSIGNMENT_ACTIVE,
+        ).select_related('department').distinct().order_by('last_name', 'first_name')
+        if not can_view_all:
+            users = users.filter(pk=request.user.pk)
+        return Response([
+            {
+                'id': user.id,
+                'name': user.get_full_name() or user.username,
+                'department_name': user.department.name if user.department_id else '',
+            }
+            for user in users
+        ])

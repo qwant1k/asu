@@ -1,6 +1,7 @@
 """Фильтры складского учёта ИС «АСУ»."""
 
 import django_filters
+from django.db.models import Q
 
 from .models import AssetAssignment, StockMovement, WarehouseStock
 
@@ -25,10 +26,14 @@ class AssignmentFilter(django_filters.FilterSet):
     group = django_filters.NumberFilter(field_name='asset__group')
     assigned_after = django_filters.DateFilter(field_name='assigned_at', lookup_expr='date__gte')
     assigned_before = django_filters.DateFilter(field_name='assigned_at', lookup_expr='date__lte')
+    mol_id = django_filters.NumberFilter(field_name='user_id')
 
     class Meta:
         model = AssetAssignment
-        fields = ['user', 'status', 'asset', 'asset_type', 'category', 'group', 'assigned_after', 'assigned_before']
+        fields = [
+            'user', 'mol_id', 'status', 'asset', 'asset_type',
+            'category', 'group', 'assigned_after', 'assigned_before',
+        ]
 
 
 class MovementFilter(django_filters.FilterSet):
@@ -39,7 +44,14 @@ class MovementFilter(django_filters.FilterSet):
     group = django_filters.NumberFilter(field_name='asset__group')
     performed_after = django_filters.DateFilter(field_name='performed_at', lookup_expr='date__gte')
     performed_before = django_filters.DateFilter(field_name='performed_at', lookup_expr='date__lte')
+    mol_id = django_filters.NumberFilter(method='filter_mol')
+
+    def filter_mol(self, queryset, name, value):
+        return queryset.filter(Q(from_user_id=value) | Q(to_user_id=value))
 
     class Meta:
         model = StockMovement
-        fields = ['movement_type', 'asset', 'asset_type', 'category', 'group', 'warehouse', 'performed_after', 'performed_before']
+        fields = [
+            'movement_type', 'asset', 'asset_type', 'category', 'group',
+            'warehouse', 'mol_id', 'performed_after', 'performed_before',
+        ]

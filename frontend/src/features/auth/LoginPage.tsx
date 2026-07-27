@@ -5,6 +5,7 @@ import { CloseOutlined, DatabaseOutlined, LockOutlined, UserOutlined } from '@an
 import { useAppSelector, useAppDispatch } from '../../app/hooks';
 import { loginThunk, clearError } from './authSlice';
 import { C, Btn } from '../../shared/ui/primitives';
+import { motion } from '../../shared/ui/animated/animations';
 
 interface AuthFieldProps extends React.InputHTMLAttributes<HTMLInputElement> {
   label: string;
@@ -28,8 +29,7 @@ const AuthField: React.FC<AuthFieldProps> = ({ label, icon, ...props }) => (
           borderRadius: C.radiusSm,
           fontSize: 13,
           color: C.heading,
-          background: 'rgba(255, 255, 255, 0.88)',
-          boxShadow: C.shadowInset,
+          background: '#FFFFFF',
           outline: 'none',
           transition: 'border-color 0.16s ease, box-shadow 0.16s ease',
         }}
@@ -70,18 +70,18 @@ const LoginPage: React.FC = () => {
         minHeight: '100vh',
         display: 'grid',
         placeItems: 'center',
-        background: 'linear-gradient(135deg, #111827 0%, #1F2937 38%, #E7ECF4 38%, #F7F9FC 100%)',
+        background: C.bg,
         padding: 24,
       }}
     >
-      <div
-        className="ui-card"
+      <motion.div
+        initial={{ opacity: 0, y: 16 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.3, ease: [0, 0, 0.2, 1] }}
         style={{
           width: 'min(100%, 420px)',
-          background: 'rgba(255, 255, 255, 0.9)',
-          backdropFilter: 'blur(24px) saturate(1.35)',
-          WebkitBackdropFilter: 'blur(24px) saturate(1.35)',
-          borderRadius: C.radiusXl,
+          background: C.surface,
+          borderRadius: C.radiusLg,
           border: `1px solid ${C.border}`,
           boxShadow: C.shadow,
           padding: 28,
@@ -92,23 +92,22 @@ const LoginPage: React.FC = () => {
             style={{
               width: 42,
               height: 42,
-              background: 'linear-gradient(145deg, #38BDF8, #2563EB)',
-              borderRadius: 15,
+              background: C.graphite,
+              borderRadius: C.radiusLg,
               display: 'inline-flex',
               alignItems: 'center',
               justifyContent: 'center',
-              boxShadow: '0 14px 30px rgba(37, 99, 235, 0.28)',
             }}
           >
             <DatabaseOutlined style={{ color: '#fff', fontSize: 18 }} />
           </div>
           <div>
-            <div style={{ fontSize: 18, fontWeight: 800, color: C.heading, lineHeight: 1.15 }}>ИС «АСУ»</div>
+            <div style={{ fontSize: 18, fontWeight: 600, color: C.heading, lineHeight: 1.15 }}>ИС «АСУ»</div>
             <div style={{ fontSize: 13, color: C.secondary, marginTop: 3 }}>{t('auth.loginSubtitle')}</div>
           </div>
         </div>
 
-        <h1 style={{ fontSize: 24, fontWeight: 800, color: C.heading, lineHeight: 1.15, marginBottom: 6 }}>
+        <h1 style={{ fontSize: 24, fontWeight: 600, color: C.heading, lineHeight: 1.15, marginBottom: 6 }}>
           {t('auth.loginTitle')}
         </h1>
 
@@ -184,7 +183,7 @@ const LoginPage: React.FC = () => {
         <div style={{ textAlign: 'center', marginTop: 22, fontSize: 12, color: C.muted }}>
           АО «КФГД» © {new Date().getFullYear()}
         </div>
-      </div>
+      </motion.div>
     </div>
   );
 };

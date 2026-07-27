@@ -176,6 +176,7 @@ export interface AssetRequest {
   pending_my_approval: boolean;
   pending_my_issue: boolean;
   required_approver_role: UserRole | null;
+  receipt_confirmed_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -259,6 +260,10 @@ export interface AssetAssignment {
   location: string;
   status: string;
   status_display: string;
+  released_at: string | null;
+  released_by: number | null;
+  released_by_name: string;
+  release_reason: string;
 }
 
 export interface AssetCard extends Asset {

@@ -5,6 +5,7 @@ import api from '../../api/axios';
 import type { AssetCategory, PaginatedResponse } from '../../shared/types';
 import { C, PageHeader, Btn, Th, Td, Badge, Spinner, EmptyState, hoverRow, Surface } from '../../shared/ui/primitives';
 import AssetLink from '../../shared/components/AssetLink';
+import { formatApiDate } from '../../shared/utils/date';
 
 const CARD_TYPES = [
   { value: '', label: 'Все' },
@@ -12,6 +13,7 @@ const CARD_TYPES = [
   { value: 'OS', label: 'ОС' },
   { value: 'NMA', label: 'НМА' },
 ];
+interface MolOption { id: number; name: string; department_name: string; }
 
 const InventoryPage: React.FC = () => {
   const { t } = useTranslation();
@@ -24,6 +26,8 @@ const InventoryPage: React.FC = () => {
   const [assignedAfter, setAssignedAfter] = useState('');
   const [assignedBefore, setAssignedBefore] = useState('');
   const [categories, setCategories] = useState<AssetCategory[]>([]);
+  const [mols, setMols] = useState<MolOption[]>([]);
+  const [molFilter, setMolFilter] = useState('');
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -35,10 +39,11 @@ const InventoryPage: React.FC = () => {
       if (groupFilter) params.group = groupFilter;
       if (assignedAfter) params.assigned_after = assignedAfter;
       if (assignedBefore) params.assigned_before = assignedBefore;
+      if (molFilter) params.mol_id = molFilter;
       const res = await api.get('/inventory/inventory-cards/', { params });
       setData(res.data.items || res.data.results || []);
     } catch { setData([]); } finally { setLoading(false); }
-  }, [assignedAfter, assignedBefore, cardType, categoryFilter, groupFilter, search]);
+  }, [assignedAfter, assignedBefore, cardType, categoryFilter, groupFilter, molFilter, search]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
   useEffect(() => {
@@ -51,6 +56,11 @@ const InventoryPage: React.FC = () => {
       } catch { setCategories([]); }
     })();
   }, [cardType]);
+  useEffect(() => {
+    api.get<MolOption[]>('/inventory/mols/')
+      .then((res) => setMols(res.data || []))
+      .catch(() => setMols([]));
+  }, []);
 
   const handleExport = async () => {
     try {
@@ -61,6 +71,7 @@ const InventoryPage: React.FC = () => {
       if (groupFilter) params.group = groupFilter;
       if (assignedAfter) params.assigned_after = assignedAfter;
       if (assignedBefore) params.assigned_before = assignedBefore;
+      if (molFilter) params.mol_id = molFilter;
       const res = await api.get('/inventory/inventory-cards/export/', { params, responseType: 'blob' });
       const url = window.URL.createObjectURL(new Blob([res.data]));
       const link = document.createElement('a'); link.href = url;
@@ -83,6 +94,14 @@ const InventoryPage: React.FC = () => {
       <PageHeader title={t('inventory.title')} right={
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
           <input placeholder={t('common.search')} value={search} onChange={(e) => setSearch(e.target.value)} style={{ ...inputStyle, width: 240 }} />
+          <select value={molFilter} onChange={(e) => setMolFilter(e.target.value)} style={{ ...inputStyle, width: 240 }}>
+            <option value="">Все МОЛ</option>
+            {mols.map((mol) => (
+              <option key={mol.id} value={mol.id}>
+                {mol.name}{mol.department_name ? ` · ${mol.department_name}` : ''}
+              </option>
+            ))}
+          </select>
           <select value={cardType} onChange={(e) => { setCardType(e.target.value); setCategoryFilter(''); setGroupFilter(''); }} style={{ ...inputStyle, width: 150 }}>
             {CARD_TYPES.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
           </select>
@@ -114,7 +133,7 @@ const InventoryPage: React.FC = () => {
                       <Td>{r.user_name}</Td><Td muted>{r.department_name}</Td><Td><AssetLink assetId={r.asset}>{r.asset_name}</AssetLink></Td>
                       <Td muted>{r.asset_code}</Td><Td><Badge status={r.asset_type_display} /></Td>
                       <Td right>{r.quantity}</Td>
-                      <Td muted>{r.assigned_at ? new Date(r.assigned_at).toLocaleDateString('ru-KZ') : '—'}</Td>
+                      <Td muted>{formatApiDate(r.assigned_at)}</Td>
                     </tr>
                   ))
                 }

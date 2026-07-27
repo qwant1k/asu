@@ -1,4 +1,4 @@
-"""
+﻿"""
 Базовые настройки Django для проекта ИС «АСУ».
 Общие настройки для всех окружений (development, production).
 """
@@ -63,6 +63,7 @@ MIDDLEWARE = [
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
+    'apps.common.audit_middleware.AuditUserMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
@@ -167,6 +168,9 @@ REST_FRAMEWORK = {
     ),
     'DATETIME_FORMAT': '%d.%m.%Y %H:%M',
     'DATE_FORMAT': '%d.%m.%Y',
+    'DEFAULT_THROTTLE_RATES': {
+        'login': os.getenv('LOGIN_THROTTLE_RATE', '10/minute'),
+    },
 }
 
 # ---------------------------------------------------------------------------
@@ -194,6 +198,21 @@ CELERY_TASK_SERIALIZER = 'json'
 CELERY_RESULT_SERIALIZER = 'json'
 CELERY_TIMEZONE = 'Asia/Almaty'
 CELERY_BEAT_SCHEDULER = 'django_celery_beat.schedulers:DatabaseScheduler'
+from celery.schedules import crontab
+CELERY_BEAT_SCHEDULE = {
+    'document-signing-reminders': {
+        'task': 'check_document_signing_reminders',
+        'schedule': crontab(minute=0, hour='*/4'),
+    },
+    'asset-expiry-check': {
+        'task': 'check_asset_expiry',
+        'schedule': crontab(minute=15, hour=7),
+    },
+    'stock-alert-check': {
+        'task': 'check_stock_alerts',
+        'schedule': crontab(minute='*/30'),
+    },
+}
 
 # ---------------------------------------------------------------------------
 # Email

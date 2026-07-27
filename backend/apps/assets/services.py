@@ -1,4 +1,4 @@
-"""Сервисный слой для складских операций ИС «АСУ»."""
+﻿"""Сервисный слой для складских операций ИС «АСУ»."""
 
 from decimal import Decimal
 from django.db import transaction
@@ -13,6 +13,8 @@ from apps.common.constants import (
     ASSIGNMENT_ACTIVE,
     ASSIGNMENT_TRANSFERRED,
     ASSIGNMENT_WRITTEN_OFF,
+    ASSIGNMENT_RELEASED,
+    MOVEMENT_UNASSIGN,
     NOTIFICATION_STOCK_ALERT,
 )
 
@@ -21,6 +23,36 @@ from .models import WarehouseStock, AssetAssignment, StockMovement, StockAlertRu
 
 class StockService:
     """Сервис складских операций. Все операции выполняются атомарно."""
+
+    @staticmethod
+    def _positive(value, label):
+        value = Decimal(str(value))
+        if value <= 0:
+            raise ValueError(_('%(label)s должно быть больше нуля') % {'label': label})
+        return value
+
+    @staticmethod
+    def _nonnegative(value, label):
+        value = Decimal(str(value))
+        if value < 0:
+            raise ValueError(_('%(label)s не может быть отрицательным') % {'label': label})
+        return value
+
+    @staticmethod
+    def _select_stock(asset, warehouse=None, warehouse_id=None):
+        stocks = WarehouseStock.objects.select_for_update().filter(asset=asset, quantity__gt=0)
+        selected_id = warehouse_id or getattr(warehouse, 'id', None)
+        if selected_id:
+            stock = stocks.filter(warehouse_id=selected_id).first()
+            if not stock:
+                raise ValueError(_('На выбранном складе актив отсутствует'))
+            return stock
+        matches = list(stocks[:2])
+        if not matches:
+            raise ValueError(_('Актив отсутствует на складе'))
+        if len(matches) > 1:
+            raise ValueError(_('Актив хранится на нескольких складах. Укажите склад'))
+        return matches[0]
 
     @staticmethod
     @transaction.atomic
@@ -36,17 +68,21 @@ class StockService:
             performed_by: пользователь, выполнивший операцию
             location: место хранения
         """
-        quantity = Decimal(str(quantity))
-        price = Decimal(str(price))
+        quantity = StockService._positive(quantity, _('Количество'))
+        price = StockService._nonnegative(price, _('Цена'))
 
-        stock, created = WarehouseStock.objects.get_or_create(
+        stock, created = WarehouseStock.objects.select_for_update().get_or_create(
             asset=asset,
-            defaults={'quantity': 0, 'total_amount': 0, 'location': location, 'warehouse': warehouse},
+            warehouse=warehouse,
+            defaults={
+                'quantity': 0, 'total_amount': 0, 'unit_price': price,
+                'location': location,
+            },
         )
+        previous_total = stock.total_amount
         stock.quantity += quantity
-        stock.total_amount = stock.quantity * asset.unit_price
-        if warehouse:
-            stock.warehouse = warehouse
+        stock.total_amount = previous_total + quantity * price
+        stock.unit_price = stock.total_amount / stock.quantity
         if location:
             stock.location = location
         stock.save()
@@ -71,19 +107,18 @@ class StockService:
 
     @staticmethod
     @transaction.atomic
-    def issue_stock(asset, quantity, to_user, document=None, performed_by=None):
+    def issue_stock(
+        asset, quantity, to_user, document=None, performed_by=None,
+        warehouse=None, warehouse_id=None,
+    ):
         """
         Выдача актива со склада сотруднику.
 
         Raises:
             ValueError: если недостаточно остатков на складе.
         """
-        quantity = Decimal(str(quantity))
-
-        try:
-            stock = WarehouseStock.objects.select_for_update().get(asset=asset)
-        except WarehouseStock.DoesNotExist:
-            raise ValueError(_('Актив отсутствует на складе'))
+        quantity = StockService._positive(quantity, _('Количество'))
+        stock = StockService._select_stock(asset, warehouse, warehouse_id)
 
         if stock.quantity < quantity:
             raise ValueError(
@@ -95,15 +130,15 @@ class StockService:
             )
 
         stock.quantity -= quantity
-        stock.total_amount = stock.quantity * asset.unit_price
+        stock.total_amount = stock.quantity * stock.unit_price
         stock.save()
 
         movement = StockMovement.objects.create(
             asset=asset,
             movement_type=MOVEMENT_ISSUE,
             quantity=quantity,
-            unit_price=asset.unit_price,
-            total_amount=quantity * asset.unit_price,
+            unit_price=stock.unit_price,
+            total_amount=quantity * stock.unit_price,
             to_user=to_user,
             performed_by=performed_by,
             warehouse=stock.warehouse,
@@ -204,19 +239,18 @@ class StockService:
 
     @staticmethod
     @transaction.atomic
-    def write_off_stock(asset, quantity, document=None, performed_by=None, comment=''):
+    def write_off_stock(
+        asset, quantity, document=None, performed_by=None, comment='',
+        warehouse=None, warehouse_id=None,
+    ):
         """
         Списание актива.
 
         Raises:
             ValueError: если недостаточно остатков.
         """
-        quantity = Decimal(str(quantity))
-
-        try:
-            stock = WarehouseStock.objects.select_for_update().get(asset=asset)
-        except WarehouseStock.DoesNotExist:
-            raise ValueError(_('Актив отсутствует на складе'))
+        quantity = StockService._positive(quantity, _('Количество'))
+        stock = StockService._select_stock(asset, warehouse, warehouse_id)
 
         if stock.quantity < quantity:
             raise ValueError(
@@ -228,21 +262,15 @@ class StockService:
             )
 
         stock.quantity -= quantity
-        stock.total_amount = stock.quantity * asset.unit_price
+        stock.total_amount = stock.quantity * stock.unit_price
         stock.save()
-
-        # Обновляем закрепления
-        AssetAssignment.objects.filter(
-            asset=asset,
-            status=ASSIGNMENT_ACTIVE,
-        ).update(status=ASSIGNMENT_WRITTEN_OFF)
 
         movement = StockMovement.objects.create(
             asset=asset,
             movement_type=MOVEMENT_WRITE_OFF,
             quantity=quantity,
-            unit_price=asset.unit_price,
-            total_amount=quantity * asset.unit_price,
+            unit_price=stock.unit_price,
+            total_amount=quantity * stock.unit_price,
             performed_by=performed_by,
             warehouse=stock.warehouse,
             comment=comment,
@@ -255,6 +283,41 @@ class StockService:
             movement.save(update_fields=['document_type', 'document_id'])
 
         return movement
+
+    @staticmethod
+    @transaction.atomic
+    def release_assignment(assignment, released_by, reason=''):
+        """Снять актив с сотрудника, сохранив историю и не меняя складской остаток."""
+        from apps.users.access import has_access
+
+        if not has_access(released_by, 'system.admin'):
+            raise ValueError(_('Снимать закрепления может только администратор'))
+        assignment = AssetAssignment.objects.select_for_update().select_related(
+            'asset', 'user',
+        ).get(pk=assignment.pk)
+        if assignment.status != ASSIGNMENT_ACTIVE:
+            raise ValueError(_('Снять можно только активное закрепление'))
+
+        assignment.status = ASSIGNMENT_RELEASED
+        assignment.released_at = timezone.now()
+        assignment.released_by = released_by
+        assignment.release_reason = (reason or '').strip()
+        assignment.save(update_fields=[
+            'status', 'released_at', 'released_by', 'release_reason',
+        ])
+
+        StockMovement.objects.create(
+            asset=assignment.asset,
+            movement_type=MOVEMENT_UNASSIGN,
+            quantity=assignment.quantity,
+            unit_price=assignment.asset.unit_price,
+            total_amount=assignment.quantity * assignment.asset.unit_price,
+            from_user=assignment.user,
+            performed_by=released_by,
+            warehouse=assignment.warehouse,
+            comment=assignment.release_reason or _('Административное снятие закрепления'),
+        )
+        return assignment
 
 
 class StockAlertService:

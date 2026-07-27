@@ -1,4 +1,4 @@
-"""Константы проекта ИС «АСУ»."""
+﻿"""Константы проекта ИС «АСУ»."""
 
 from django.utils.translation import gettext_lazy as _
 
@@ -61,11 +61,13 @@ PERIOD_CHOICES = [
 ASSIGNMENT_ACTIVE = 'ACTIVE'
 ASSIGNMENT_TRANSFERRED = 'TRANSFERRED'
 ASSIGNMENT_WRITTEN_OFF = 'WRITTEN_OFF'
+ASSIGNMENT_RELEASED = 'RELEASED'
 
 ASSIGNMENT_STATUS_CHOICES = [
     (ASSIGNMENT_ACTIVE, _('Активно')),
     (ASSIGNMENT_TRANSFERRED, _('Передано')),
     (ASSIGNMENT_WRITTEN_OFF, _('Списано')),
+    (ASSIGNMENT_RELEASED, _('Снято с закрепления')),
 ]
 
 # --- Типы движения ---
@@ -74,6 +76,7 @@ MOVEMENT_ISSUE = 'ISSUE'
 MOVEMENT_TRANSFER = 'TRANSFER'
 MOVEMENT_WRITE_OFF = 'WRITE_OFF'
 MOVEMENT_INVENTORY_ADJUSTMENT = 'INVENTORY_ADJUSTMENT'
+MOVEMENT_UNASSIGN = 'UNASSIGN'
 
 MOVEMENT_TYPE_CHOICES = [
     (MOVEMENT_RECEIPT, _('Оприходование')),
@@ -81,6 +84,7 @@ MOVEMENT_TYPE_CHOICES = [
     (MOVEMENT_TRANSFER, _('Перемещение')),
     (MOVEMENT_WRITE_OFF, _('Списание')),
     (MOVEMENT_INVENTORY_ADJUSTMENT, _('Корректировка по инвентаризации')),
+    (MOVEMENT_UNASSIGN, _('Снятие закрепления')),
 ]
 
 # --- Статусы заявок ---
@@ -88,10 +92,9 @@ REQUEST_DRAFT = 'DRAFT'
 REQUEST_SENT_FOR_REVISION = 'SENT_FOR_REVISION'
 REQUEST_PENDING_SUPERVISOR = 'PENDING_SUPERVISOR'
 REQUEST_APPROVED_SUPERVISOR = 'APPROVED_SUPERVISOR'
-REQUEST_APPROVED_MOL = 'APPROVED_MOL'
-REQUEST_APPROVED_AHS_HEAD = 'APPROVED_AHS_HEAD'
 REQUEST_APPROVED = 'APPROVED'
 REQUEST_EXECUTED = 'EXECUTED'
+REQUEST_PARTIALLY_ISSUED = 'PARTIALLY_ISSUED'
 REQUEST_REJECTED = 'REJECTED'
 REQUEST_CANCELLED = 'CANCELLED'
 
@@ -100,9 +103,8 @@ REQUEST_STATUS_CHOICES = [
     (REQUEST_SENT_FOR_REVISION, _('На корректировке')),
     (REQUEST_PENDING_SUPERVISOR, _('На согласовании у руководителя')),
     (REQUEST_APPROVED_SUPERVISOR, _('Согласована руководителем')),
-    (REQUEST_APPROVED_MOL, _('Согласована МОЛ')),
-    (REQUEST_APPROVED_AHS_HEAD, _('Утверждена руководителем АХС')),
     (REQUEST_APPROVED, _('Согласована')),
+    (REQUEST_PARTIALLY_ISSUED, _('Частично выдана')),
     (REQUEST_EXECUTED, _('Выдана')),
     (REQUEST_REJECTED, _('Отклонена')),
     (REQUEST_CANCELLED, _('Отменена')),

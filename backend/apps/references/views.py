@@ -9,6 +9,7 @@ from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.response import Response
 
 from apps.common.permissions import ReadOnlyOrAHSStaff
+from apps.common.trash import SoftDeleteViewSetMixin
 
 from apps.requests.models import ApprovalStep
 
@@ -28,7 +29,7 @@ from .serializers import (
 )
 
 
-class CounterpartyViewSet(viewsets.ModelViewSet):
+class CounterpartyViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
     queryset = Counterparty.objects.annotate(contracts_count=Count('contracts'))
     serializer_class = CounterpartySerializer
     permission_classes = [ReadOnlyOrAHSStaff]
@@ -38,7 +39,7 @@ class CounterpartyViewSet(viewsets.ModelViewSet):
     ordering = ['name']
 
 
-class ContractViewSet(viewsets.ModelViewSet):
+class ContractViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
     queryset = Contract.objects.select_related('counterparty').all()
     serializer_class = ContractSerializer
     permission_classes = [ReadOnlyOrAHSStaff]
@@ -49,7 +50,7 @@ class ContractViewSet(viewsets.ModelViewSet):
     ordering = ['-contract_date', 'name']
 
 
-class LimitNormViewSet(viewsets.ModelViewSet):
+class LimitNormViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
     queryset = LimitNorm.objects.select_related('department').all()
     serializer_class = LimitNormSerializer
     permission_classes = [ReadOnlyOrAHSStaff]
@@ -62,7 +63,7 @@ class LimitNormViewSet(viewsets.ModelViewSet):
         serializer.save(created_by=self.request.user)
 
 
-class RequestTypeViewSet(viewsets.ModelViewSet):
+class RequestTypeViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
     queryset = RequestType.objects.prefetch_related('approval_steps').all()
     serializer_class = RequestTypeSerializer
     permission_classes = [ReadOnlyOrAHSStaff]
@@ -71,7 +72,7 @@ class RequestTypeViewSet(viewsets.ModelViewSet):
     ordering = ['name']
 
 
-class ApprovalStepViewSet(viewsets.ModelViewSet):
+class ApprovalStepViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
     """CRUD настраиваемых этапов согласования."""
     queryset = ApprovalStep.objects.select_related('request_type').all()
     serializer_class = ApprovalStepSerializer
@@ -80,7 +81,7 @@ class ApprovalStepViewSet(viewsets.ModelViewSet):
     ordering = ['request_type', 'order']
 
 
-class AssetCategoryViewSet(viewsets.ModelViewSet):
+class AssetCategoryViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
     serializer_class = AssetCategorySerializer
     permission_classes = [ReadOnlyOrAHSStaff]
     filterset_fields = ['asset_type', 'parent']
@@ -95,7 +96,7 @@ class AssetCategoryViewSet(viewsets.ModelViewSet):
                     Case(
                         When(
                             asset_type='TMZ',
-                            then=F('grouped_assets__warehouse_stock__quantity'),
+                            then=F('grouped_assets__warehouse_stocks__quantity'),
                         ),
                         default=Value(1),
                         output_field=DecimalField(max_digits=12, decimal_places=2),
@@ -107,30 +108,31 @@ class AssetCategoryViewSet(viewsets.ModelViewSet):
         )
 
 
-class AssetViewSet(viewsets.ModelViewSet):
+class AssetViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
     serializer_class = AssetSerializer
     permission_classes = [ReadOnlyOrAHSStaff]
     filterset_class = AssetFilter
     search_fields = [
         'name', 'code', 'inventory_number', 'category__name', 'group__name',
         'unit_of_measure', 'unit_of_measure_ref__name',
-        'warehouse_stock__warehouse__name', 'warehouse_stock__location',
+        'warehouse_stocks__warehouse__name', 'warehouse_stocks__location',
     ]
     ordering_fields = [
         'name', 'code', 'unit_price', 'created_at',
         'category__name', 'group__name', 'unit_of_measure',
-        'warehouse_stock__warehouse__name', 'warehouse_stock__quantity',
-        'warehouse_stock__total_amount', 'warehouse_stock__balance_date',
+        'warehouse_stocks__warehouse__name', 'warehouse_stocks__quantity',
+        'warehouse_stocks__total_amount', 'warehouse_stocks__balance_date',
     ]
     ordering = ['name']
 
     def get_queryset(self):
         return Asset.objects.select_related(
             'category', 'group', 'unit_of_measure_ref',
-            'warehouse_stock', 'warehouse_stock__warehouse',
+        ).prefetch_related(
+            'warehouse_stocks', 'warehouse_stocks__warehouse',
         ).annotate(
             stock_quantity=Coalesce(
-                F('warehouse_stock__quantity'),
+                Sum('warehouse_stocks__quantity'),
                 Value(0),
                 output_field=DecimalField(),
             ),
@@ -166,12 +168,17 @@ class AssetViewSet(viewsets.ModelViewSet):
             with transaction.atomic():
                 asset = serializer.save()
                 if any(field in request.data for field in stock_fields):
+                    warehouse_id = request.data.get('warehouse') or None
                     stock, _ = WarehouseStock.objects.get_or_create(
                         asset=asset,
-                        defaults={'quantity': Decimal('0'), 'total_amount': Decimal('0')},
+                        warehouse_id=warehouse_id,
+                        defaults={
+                            'quantity': Decimal('0'),
+                            'total_amount': Decimal('0'),
+                            'unit_price': asset.unit_price,
+                        },
                     )
                     if 'warehouse' in request.data:
-                        warehouse_id = request.data.get('warehouse') or None
                         stock.warehouse = Warehouse.objects.filter(pk=warehouse_id).first() if warehouse_id else None
                         if warehouse_id and stock.warehouse is None:
                             raise ValidationError({'warehouse': 'Склад не найден.'})
@@ -184,7 +191,8 @@ class AssetViewSet(viewsets.ModelViewSet):
                         stock.balance_date = request.data.get('stock_balance_date') or None
                     if 'stock_location' in request.data:
                         stock.location = request.data.get('stock_location') or ''
-                    stock.total_amount = stock.quantity * asset.unit_price
+                    stock.unit_price = asset.unit_price
+                    stock.total_amount = stock.quantity * stock.unit_price
                     stock.save()
                 asset = self.get_queryset().get(pk=asset.pk)
 
@@ -193,7 +201,7 @@ class AssetViewSet(viewsets.ModelViewSet):
         ).filter(asset=asset)[:25]
         assignments = AssetAssignment.objects.select_related(
             'user', 'assigned_by', 'user__department', 'warehouse',
-        ).filter(asset=asset).exclude(status=ASSIGNMENT_WRITTEN_OFF)
+        ).filter(asset=asset, status='ACTIVE')
 
         data = self.get_serializer(asset).data
         data['movements'] = StockMovementSerializer(movements, many=True).data
@@ -201,7 +209,7 @@ class AssetViewSet(viewsets.ModelViewSet):
         return Response(data)
 
 
-class UnitOfMeasureViewSet(viewsets.ModelViewSet):
+class UnitOfMeasureViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
     queryset = UnitOfMeasure.objects.all()
     serializer_class = UnitOfMeasureSerializer
     permission_classes = [ReadOnlyOrAHSStaff]
@@ -210,7 +218,7 @@ class UnitOfMeasureViewSet(viewsets.ModelViewSet):
     ordering = ['name']
 
 
-class WarehouseViewSet(viewsets.ModelViewSet):
+class WarehouseViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
     queryset = Warehouse.objects.select_related('department').all()
     serializer_class = WarehouseSerializer
     permission_classes = [ReadOnlyOrAHSStaff]
@@ -220,7 +228,7 @@ class WarehouseViewSet(viewsets.ModelViewSet):
     ordering = ['name']
 
 
-class PositionViewSet(viewsets.ModelViewSet):
+class PositionViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
     queryset = Position.objects.all()
     serializer_class = PositionSerializer
     permission_classes = [ReadOnlyOrAHSStaff]

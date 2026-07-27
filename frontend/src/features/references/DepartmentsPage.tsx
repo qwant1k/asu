@@ -7,6 +7,8 @@ import {
   C, PageHeader, Btn, Th, Td, Modal, InputField, SelectField,
   Spinner, EmptyState, hoverRow, Popconfirm, Surface, FilterBar,
 } from '../../shared/ui/primitives';
+import { AnimatePresence } from '../../shared/ui/animated/animations';
+import AnimatedRow from '../../shared/ui/animated/AnimatedRow';
 
 const PAGE_SIZE = 20;
 
@@ -111,7 +113,8 @@ const DepartmentsPage: React.FC = () => {
   const handleDelete = async (item: Department) => {
     try {
       await api.delete(`/departments/${item.id}/`);
-      await fetchData();
+      setData((prev) => prev.filter((x) => x.id !== item.id));
+      setTotal((prev) => Math.max(0, prev - 1));
     } catch { /* ignore */ }
     setDeleteItem(null);
   };
@@ -160,8 +163,9 @@ const DepartmentsPage: React.FC = () => {
                 </tr>
               </thead>
               <tbody>
+                <AnimatePresence>
                 {data.map((dept) => (
-                  <tr key={dept.id} onMouseEnter={(e) => hoverRow(e, true)} onMouseLeave={(e) => hoverRow(e, false)}>
+                  <AnimatedRow key={dept.id} onMouseEnter={(e) => hoverRow(e, true)} onMouseLeave={(e) => hoverRow(e, false)}>
                     <Td bold>{dept.name}</Td>
                     <Td muted>{dept.code}</Td>
                     <Td>{dept.head_name || '—'}</Td>
@@ -172,8 +176,9 @@ const DepartmentsPage: React.FC = () => {
                         <button onClick={() => setDeleteItem(dept)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: C.danger, fontSize: 13 }}><DeleteOutlined /></button>
                       </div>
                     </Td>
-                  </tr>
+                  </AnimatedRow>
                 ))}
+                </AnimatePresence>
               </tbody>
             </table>
           </div>

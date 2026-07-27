@@ -5,7 +5,10 @@ from rest_framework.decorators import action
 from rest_framework.permissions import BasePermission
 from rest_framework.response import Response
 from django.utils.translation import gettext_lazy as _
+from rest_framework.exceptions import ValidationError
+from apps.common.constants import DOCUMENT_DRAFT, DOCUMENT_SENT_FOR_REVISION
 from apps.users.access import has_access
+from apps.common.trash import SoftDeleteViewSetMixin, move_to_trash
 
 from .models import (
     IncomingInvoice, WriteOffAct, Petition,
@@ -43,8 +46,35 @@ class CanManageDocuments(BasePermission):
         )
 
 
-class DocumentSignMixin:
+class DocumentSignMixin(SoftDeleteViewSetMixin):
     """Миксин для действий подписания документов."""
+
+    def perform_update(self, serializer):
+        document = self.get_object()
+        if document.status not in (DOCUMENT_DRAFT, DOCUMENT_SENT_FOR_REVISION):
+            raise ValidationError({
+                'detail': _('Изменять можно только черновик или документ, возвращённый на доработку'),
+            })
+        if document.created_by_id != self.request.user.id and not has_access(
+            self.request.user, 'system.admin',
+        ):
+            raise ValidationError({'detail': _('Изменять документ может только его автор')})
+        serializer.save()
+
+    def perform_destroy(self, instance):
+        if instance.status != DOCUMENT_DRAFT:
+            raise ValidationError({
+                'detail': _('Физическое удаление зарегистрированного документа запрещено'),
+            })
+        if instance.created_by_id != self.request.user.id and not has_access(
+            self.request.user, 'system.admin',
+        ):
+            raise ValidationError({'detail': _('Удалить черновик может только его автор')})
+        move_to_trash(
+            instance,
+            self.request.user,
+            self.request.data.get('reason', ''),
+        )
 
     @action(detail=True, methods=['post'])
     def sign(self, request, pk=None):

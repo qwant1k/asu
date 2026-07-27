@@ -1,7 +1,10 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { PlusOutlined } from '@ant-design/icons';
+import {
+  PlusOutlined, FileTextOutlined, ClockCircleOutlined, CheckCircleOutlined,
+  BellOutlined, AuditOutlined, InboxOutlined, AlertOutlined,
+} from '@ant-design/icons';
 import { useAppSelector } from '../../app/hooks';
 import api from '../../api/axios';
 import type {
@@ -152,44 +155,44 @@ const DashboardPage: React.FC = () => {
         subtitle={t('dashboard.subtitle')}
       />
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 16, marginBottom: 16 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12, marginBottom: 14 }}>
         <div style={{ cursor: 'pointer' }} onClick={() => navigate('/requests')}>
-          <StatCard label={t('dashboard.myRequests')} value={myRequestsTotal} sub="Всего заявок" />
+          <StatCard label={t('dashboard.myRequests')} value={myRequestsTotal} sub="Всего заявок" icon={<FileTextOutlined />} />
         </div>
         <div style={{ cursor: 'pointer' }} onClick={() => navigate('/requests')}>
-          <StatCard label={t('dashboard.myInProgress')} value={myInProgress} sub="В процессе согласования" />
+          <StatCard label={t('dashboard.myInProgress')} value={myInProgress} sub="В процессе" icon={<ClockCircleOutlined />} color={C.info} />
         </div>
         <div style={{ cursor: 'pointer' }} onClick={() => navigate('/requests')}>
-          <StatCard label={t('dashboard.approvedReady')} value={myApproved} sub="К получению" color={myApproved > 0 ? C.success : undefined} />
+          <StatCard label={t('dashboard.approvedReady')} value={myApproved} sub="К получению" color={myApproved > 0 ? C.success : undefined} icon={<CheckCircleOutlined />} />
         </div>
-        <div style={{ cursor: 'pointer' }} onClick={() => navigate('/profile')}>
-          <StatCard label={t('dashboard.unreadNotifications')} value={unreadCount} sub="Уведомления" color={unreadCount > 0 ? C.accent : undefined} />
+        <div>
+          <StatCard label={t('dashboard.unreadNotifications')} value={unreadCount} sub="Уведомления" color={unreadCount > 0 ? C.accent : undefined} icon={<BellOutlined />} />
         </div>
       </div>
 
       {isApprover && (
         <div style={{
           display: 'grid',
-          gridTemplateColumns: isWarehouseKeeper ? 'repeat(auto-fit, minmax(210px, 1fr))' : 'minmax(210px, 360px)',
-          gap: 16, marginBottom: 24,
+          gridTemplateColumns: isWarehouseKeeper ? 'repeat(auto-fit, minmax(180px, 1fr))' : 'minmax(180px, 320px)',
+          gap: 12, marginBottom: 16,
         }}>
           <div style={{ cursor: 'pointer' }} onClick={() => navigate('/requests')}>
-            <StatCard label={t('dashboard.pendingApprovals')} value={pendingApprovalCount} sub="Требуют решения" color={pendingApprovalCount > 0 ? C.danger : undefined} />
+            <StatCard label={t('dashboard.pendingApprovals')} value={pendingApprovalCount} sub="Требуют решения" color={pendingApprovalCount > 0 ? C.danger : undefined} icon={<AlertOutlined />} />
           </div>
           {isWarehouseKeeper && (
             <>
               <div style={{ cursor: 'pointer' }} onClick={() => navigate('/warehouse/stock')}>
-                <StatCard label={t('dashboard.stockValue')} value={stockValue.toLocaleString('ru-KZ')} sub="ТМЗ + ОС на складе" />
+                <StatCard label={t('dashboard.stockValue')} value={stockValue.toLocaleString('ru-KZ')} sub="ТМЗ + ОС" icon={<InboxOutlined />} />
               </div>
               <div style={{ cursor: 'pointer' }} onClick={() => navigate('/warehouse/stock')}>
-                <StatCard label={t('dashboard.lowStock')} value={lowStockItems.length} sub="Требуют внимания" color={lowStockItems.length > 0 ? C.warning : undefined} />
+                <StatCard label={t('dashboard.lowStock')} value={lowStockItems.length} sub="Требуют внимания" color={lowStockItems.length > 0 ? C.warning : undefined} icon={<AlertOutlined />} />
               </div>
             </>
           )}
         </div>
       )}
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 20, marginBottom: isWarehouseKeeper ? 20 : 0 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 14, marginBottom: isWarehouseKeeper ? 14 : 0 }}>
         <Panel
           title={t('dashboard.myRecentRequests')}
           titleRight={<Btn onClick={() => navigate('/requests/new')}><PlusOutlined /> {t('requests.createNew')}</Btn>}
@@ -235,7 +238,7 @@ const DashboardPage: React.FC = () => {
       </div>
 
       {isWarehouseKeeper && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 20 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 14 }}>
           <Panel title={t('dashboard.recentIssues')} noPad>
             {recentIssues.length === 0 ? <div style={{ padding: 20 }}><EmptyState text={t('dashboard.noRecentIssues')} /></div> : (
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
@@ -277,8 +280,15 @@ const DashboardPage: React.FC = () => {
           title={t('dashboard.myInventory')}
           titleRight={<ViewAllLink onClick={() => navigate('/inventory')} label={t('dashboard.viewAll')} />}
         >
-          <div style={{ fontSize: 28, fontWeight: 700, color: C.heading }}>{inventoryCount}</div>
-          <div style={{ fontSize: 12, color: C.muted, marginTop: 4 }}>{t('dashboard.itemsInCard')}</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+            <div style={{ width: 44, height: 44, borderRadius: 10, background: `${C.accent}14`, color: C.accent, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 22, flexShrink: 0 }}>
+              <AuditOutlined />
+            </div>
+            <div>
+              <div style={{ fontSize: 26, fontWeight: 800, color: C.heading, lineHeight: 1.1 }}>{inventoryCount}</div>
+              <div style={{ fontSize: 11, color: C.muted, marginTop: 2 }}>{t('dashboard.itemsInCard')}</div>
+            </div>
+          </div>
         </Panel>
       )}
     </div>

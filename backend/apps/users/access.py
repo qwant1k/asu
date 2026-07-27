@@ -1,4 +1,4 @@
-"""Application access rights and effective permission helpers."""
+﻿"""Application access rights and effective permission helpers."""
 
 from __future__ import annotations
 
@@ -115,22 +115,36 @@ def role_access_codes(user) -> set[str]:
     return set(ROLE_DEFAULT_ACCESS.get(getattr(user, 'role', ROLE_USER), set()))
 
 
+_access_cache = {}
+
+
 def effective_access_codes(user) -> set[str]:
-    """Return permissions after role defaults, position rules, and user overrides."""
+    """Return permissions after role defaults, position rules, and user overrides.
+
+    Results are cached per-request via a module-level dict keyed by user id.
+    The cache is cleared by a request_finished signal (see apps/users/apps.py).
+    """
     if not user or not getattr(user, 'is_authenticated', False):
         return set()
     if getattr(user, 'is_superuser', False):
         return set(ALL_ACCESS_CODES)
 
+    cache_key = getattr(user, 'id', None)
+    if cache_key and cache_key in _access_cache:
+        return _access_cache[cache_key]
+
     codes = role_access_codes(user)
     normalized_position = normalize_position(user_position_name(user))
 
     if normalized_position:
+        from apps.common.trash import exclude_trashed
         from .models import PositionAccessRule
 
-        rules = PositionAccessRule.objects.filter(
-            normalized_position=normalized_position,
-            is_active=True,
+        rules = exclude_trashed(
+            PositionAccessRule.objects.filter(
+                normalized_position=normalized_position,
+                is_active=True,
+            )
         )
         for rule in rules:
             if rule.is_allowed:
@@ -138,9 +152,10 @@ def effective_access_codes(user) -> set[str]:
             else:
                 codes.discard(rule.permission_code)
 
+    from apps.common.trash import exclude_trashed
     from .models import UserAccessOverride
 
-    overrides = UserAccessOverride.objects.filter(user=user)
+    overrides = exclude_trashed(UserAccessOverride.objects.filter(user=user))
     for override in overrides:
         if override.mode == UserAccessOverride.MODE_GRANT:
             codes.add(override.permission_code)
@@ -150,7 +165,15 @@ def effective_access_codes(user) -> set[str]:
     if MANAGER_ACCESS_CODE in codes:
         codes.update(MANAGER_GRANTED_ACCESS)
 
+    if cache_key:
+        _access_cache[cache_key] = codes
+
     return codes
+
+
+def clear_access_cache(**kwargs):
+    """Clear the request-scoped access cache."""
+    _access_cache.clear()
 
 
 def has_access(user, code: str) -> bool:
@@ -172,21 +195,25 @@ def effective_access_detail(user) -> dict:
     user_overrides = {}
 
     if normalized_position:
+        from apps.common.trash import exclude_trashed
         from .models import PositionAccessRule
 
         position_rules = {
             item.permission_code: item.is_allowed
-            for item in PositionAccessRule.objects.filter(
-                normalized_position=normalized_position,
-                is_active=True,
+            for item in exclude_trashed(
+                PositionAccessRule.objects.filter(
+                    normalized_position=normalized_position,
+                    is_active=True,
+                )
             )
         }
 
+    from apps.common.trash import exclude_trashed
     from .models import UserAccessOverride
 
     user_overrides = {
         item.permission_code: item.mode
-        for item in UserAccessOverride.objects.filter(user=user)
+        for item in exclude_trashed(UserAccessOverride.objects.filter(user=user))
     }
 
     items = []

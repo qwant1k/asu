@@ -7,6 +7,8 @@ import {
   C, PageHeader, Btn, Th, Td, Badge, StatCard, Drawer, InputField, SelectField, TextAreaField,
   Spinner, EmptyState, hoverRow, Popconfirm, Surface,
 } from '../../shared/ui/primitives';
+import { AnimatePresence } from '../../shared/ui/animated/animations';
+import AnimatedRow from '../../shared/ui/animated/AnimatedRow';
 
 const RequestTypesPage: React.FC = () => {
   const { t } = useTranslation();
@@ -107,7 +109,7 @@ const RequestTypesPage: React.FC = () => {
   };
 
   const handleDelete = async (r: RequestTypeReference) => {
-    try { await api.delete(`/references/request-types/${r.id}/`); fetchData(); } catch { /* */ }
+    try { await api.delete(`/references/request-types/${r.id}/`); setData((prev) => prev.filter((x) => x.id !== r.id)); } catch { /* */ }
     setDeleteItem(null);
   };
 
@@ -218,8 +220,9 @@ const RequestTypesPage: React.FC = () => {
               </tr>
             </thead>
             <tbody>
+              <AnimatePresence>
               {data.map((r) => (
-                <tr key={r.id} onMouseEnter={(e) => hoverRow(e, true)} onMouseLeave={(e) => hoverRow(e, false)}>
+                <AnimatedRow key={r.id} onMouseEnter={(e) => hoverRow(e, true)} onMouseLeave={(e) => hoverRow(e, false)}>
                   <Td>
                     <div style={{ fontWeight: 500, color: C.heading }}>{r.name}</div>
                     <div style={{ fontSize: 11, color: C.muted }}>{r.code}</div>
@@ -237,8 +240,9 @@ const RequestTypesPage: React.FC = () => {
                       <button onClick={() => setDeleteItem(r)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: C.danger, fontSize: 13 }}><DeleteOutlined /></button>
                     </div>
                   </Td>
-                </tr>
+                </AnimatedRow>
               ))}
+              </AnimatePresence>
             </tbody>
           </table>
         )}

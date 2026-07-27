@@ -19,3 +19,10 @@ export function isDepartmentApprover(user: User | null | undefined) {
   const permissions = user?.effective_permissions || [];
   return Boolean(user && (user.role === 'DEPT_HEAD' || permissions.includes('requests.approve_department')));
 }
+
+export function hasAnyAccess(user: User | null | undefined, codes: string[]) {
+  if (!user) return false;
+  if (user.is_superuser || user.role === 'ADMIN') return true;
+  const permissions = user.effective_permissions || [];
+  return codes.some((code) => permissions.includes(code));
+}

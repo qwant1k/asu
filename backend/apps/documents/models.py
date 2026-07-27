@@ -1,4 +1,4 @@
-"""Модели документооборота ИС «АСУ»."""
+﻿"""Модели документооборота ИС «АСУ»."""
 
 from django.db import models
 from django.conf import settings
@@ -45,23 +45,15 @@ class BaseDocument(TimestampMixin):
     def assign_number(self):
         """Автоприсвоение номера и даты после финального подписания."""
         if not self.number:
-            year = timezone.now().year
-            model_class = type(self)
-            last = model_class.objects.filter(
-                number__endswith=f'/{year}'
-            ).exclude(number='').order_by('-number').first()
+            from django.db import transaction
+            from apps.common.numbering import next_number
 
-            if last and last.number:
-                try:
-                    last_num = int(last.number.split('/')[0])
-                except (ValueError, IndexError):
-                    last_num = 0
-            else:
-                last_num = 0
-
-            self.number = f'{last_num + 1:03d}/{year}'
-            self.date = timezone.now().date()
-            self.save(update_fields=['number', 'date'])
+            with transaction.atomic():
+                year = timezone.now().year
+                model_scope = f'{self._meta.app_label}.{self._meta.model_name}'
+                self.number = next_number(model_scope, year)
+                self.date = timezone.now().date()
+                self.save(update_fields=['number', 'date'])
 
 
 # ========================================================================

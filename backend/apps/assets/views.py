@@ -1,4 +1,4 @@
-"""Views активов и склада ИС «АСУ»."""
+﻿"""Views активов и склада ИС «АСУ»."""
 
 from decimal import Decimal, InvalidOperation
 from datetime import datetime
@@ -7,6 +7,7 @@ from django.db import transaction
 from django.utils.translation import gettext_lazy as _
 from openpyxl import load_workbook
 from rest_framework import status, viewsets, mixins
+from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -18,6 +19,8 @@ from apps.common.constants import (
 )
 from apps.references.models import Asset, AssetCategory, UnitOfMeasure, Warehouse
 from apps.users.access import has_access
+from apps.common.permissions import IsAdmin
+from apps.common.trash import SoftDeleteViewSetMixin
 
 from .filters import AssignmentFilter, MovementFilter, WarehouseStockFilter
 from .models import WarehouseStock, AssetAssignment, StockMovement, StockAlertRule, StockAlertState
@@ -28,18 +31,7 @@ from .serializers import (
     StockAlertRuleSerializer,
     ActiveStockAlertSerializer,
 )
-from .services import StockAlertService
-
-
-class CanUploadStock:
-    """Разрешение на загрузку остатков склада."""
-
-    def has_permission(self, request, view):
-        return (
-            request.user
-            and request.user.is_authenticated
-            and has_access(request.user, 'warehouse.upload')
-        )
+from .services import StockAlertService, StockService
 
 
 class CanViewWarehouse:
@@ -68,9 +60,9 @@ class CanManageStockAlerts:
 
 
 class StockUploadView(APIView):
-    """Загрузка остатков ТМЗ/ОС из Excel на выбранную дату."""
+    """Административная загрузка остатков ТМЗ/ОС из Excel на выбранную дату."""
 
-    permission_classes = [CanUploadStock]
+    permission_classes = [IsAdmin]
 
     # Распознаваемые заголовки столбцов (рус / каз / англ)
     COLUMN_MAP = {
@@ -264,18 +256,22 @@ class StockUploadView(APIView):
                 else:
                     updated_assets += 1
 
-                existing_stock = WarehouseStock.objects.select_for_update().filter(asset=asset).first()
+                existing_stock = WarehouseStock.objects.select_for_update().filter(
+                    asset=asset,
+                    warehouse=item['warehouse'],
+                ).first()
                 old_quantity = existing_stock.quantity if existing_stock else Decimal('0')
                 old_total = existing_stock.total_amount if existing_stock else Decimal('0')
 
                 stock, stock_created = WarehouseStock.objects.update_or_create(
                     asset=asset,
+                    warehouse=item['warehouse'],
                     defaults={
                         'quantity': item['quantity'],
                         'total_amount': item['total_amount'],
+                        'unit_price': item['unit_price'],
                         'balance_date': balance_date,
-                        'warehouse': item['warehouse'],
-                        'location': item['location'] or (asset.warehouse_stock.location if hasattr(asset, 'warehouse_stock') else ''),
+                        'location': item['location'] or (existing_stock.location if existing_stock else ''),
                     },
                 )
                 if stock_created:
@@ -360,16 +356,40 @@ class WarehouseStockViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin,
 
 
 class AssetAssignmentViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin,
-                             viewsets.GenericViewSet):
-    """Просмотр закреплений активов."""
+                             mixins.CreateModelMixin, viewsets.GenericViewSet):
+    """Просмотр и создание закреплений активов."""
     queryset = AssetAssignment.objects.select_related(
         'asset', 'asset__category', 'asset__group', 'user', 'assigned_by', 'warehouse',
     ).all()
     serializer_class = AssetAssignmentSerializer
     permission_classes = [CanViewWarehouse]
     filterset_class = AssignmentFilter
-    search_fields = ['asset__name', 'user__last_name']
+    search_fields = [
+        'asset__name', 'asset__code', 'asset__inventory_number',
+        'user__username', 'user__last_name', 'user__first_name', 'user__patronymic',
+    ]
     ordering_fields = ['assigned_at', 'status']
+
+    def perform_create(self, serializer):
+        serializer.save(assigned_by=self.request.user)
+
+    @action(detail=True, methods=['post'], url_path='release')
+    def release(self, request, pk=None):
+        """Административно снять актив с сотрудника без удаления истории."""
+        if not has_access(request.user, 'system.admin'):
+            return Response(
+                {'detail': _('Снимать закрепления может только администратор')},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        try:
+            assignment = StockService.release_assignment(
+                self.get_object(),
+                released_by=request.user,
+                reason=request.data.get('reason', ''),
+            )
+        except ValueError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(AssetAssignmentSerializer(assignment).data)
 
 
 class StockMovementViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin,
@@ -385,7 +405,7 @@ class StockMovementViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin,
     ordering_fields = ['performed_at', 'total_amount']
 
 
-class StockAlertRuleViewSet(viewsets.ModelViewSet):
+class StockAlertRuleViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
     """Настройки критических остатков."""
 
     queryset = StockAlertRule.objects.prefetch_related(

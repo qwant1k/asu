@@ -19,7 +19,8 @@ import type { AssetCategory, Department, PaginatedResponse } from '../../shared/
 import { Badge, Btn, C, EmptyState, FilterBar, InputField, PageHeader, Panel, SelectField, Spinner, Th, Td, hoverRow } from '../../shared/ui/primitives';
 import AssetLink from '../../shared/components/AssetLink';
 
-type FilterKey = 'search' | 'assetType' | 'category' | 'group' | 'dateRange' | 'movementType' | 'requestStatus' | 'actType' | 'department';
+type FilterKey = 'search' | 'assetType' | 'category' | 'group' | 'dateRange' | 'movementType' | 'requestStatus' | 'actType' | 'department' | 'mol';
+interface MolOption { id: number; name: string; department_name: string; }
 
 interface ReportColumn {
   key: string;
@@ -53,6 +54,7 @@ const MOVEMENT_TYPES = [
   { value: 'TRANSFER', label: 'Перемещение' },
   { value: 'WRITE_OFF', label: 'Списание' },
   { value: 'INVENTORY_ADJUSTMENT', label: 'Корректировка по инвентаризации' },
+  { value: 'UNASSIGN', label: 'Снятие закрепления' },
 ];
 
 const REQUEST_STATUSES = [
@@ -121,7 +123,7 @@ const reports: ReportConfig[] = [
     section: 'assignments',
     icon: <TeamOutlined />,
     fixedAssetType: 'OS',
-    filters: ['search', 'category', 'group', 'dateRange'],
+    filters: ['search', 'category', 'group', 'dateRange', 'mol'],
     columns: [
       { key: 'user_name', label: 'Сотрудник' },
       { key: 'department_name', label: 'Подразделение' },
@@ -138,7 +140,7 @@ const reports: ReportConfig[] = [
     section: 'assignments',
     icon: <TeamOutlined />,
     fixedAssetType: 'NMA',
-    filters: ['search', 'category', 'group', 'dateRange'],
+    filters: ['search', 'category', 'group', 'dateRange', 'mol'],
     columns: [
       { key: 'user_name', label: 'Сотрудник' },
       { key: 'department_name', label: 'Подразделение' },
@@ -154,7 +156,7 @@ const reports: ReportConfig[] = [
     titleKey: 'reports.inventoryReport',
     section: 'assignments',
     icon: <AuditOutlined />,
-    filters: ['search', 'assetType', 'category', 'group', 'department'],
+    filters: ['search', 'assetType', 'category', 'group', 'department', 'mol'],
     columns: [
       { key: 'user_name', label: 'Сотрудник' },
       { key: 'department_name', label: 'Подразделение' },
@@ -171,7 +173,7 @@ const reports: ReportConfig[] = [
     titleKey: 'reports.movement',
     section: 'movement',
     icon: <SwapOutlined />,
-    filters: ['search', 'assetType', 'category', 'group', 'dateRange', 'movementType'],
+    filters: ['search', 'assetType', 'category', 'group', 'dateRange', 'movementType', 'mol'],
     columns: [
       { key: 'performed_at', label: 'Дата' },
       { key: 'movement_type_display', label: 'Операция', badge: true },
@@ -227,6 +229,7 @@ const EMPTY_FILTERS = {
   requestStatus: '',
   actType: '',
   departmentId: '',
+  molId: '',
 };
 
 function formatSummaryValue(value: any): string {
@@ -249,6 +252,7 @@ const ReportsPage: React.FC = () => {
   const [exporting, setExporting] = useState(false);
   const [categories, setCategories] = useState<AssetCategory[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
+  const [mols, setMols] = useState<MolOption[]>([]);
 
   const [filters, setFilters] = useState(EMPTY_FILTERS);
   const [searchInput, setSearchInput] = useState('');
@@ -291,6 +295,7 @@ const ReportsPage: React.FC = () => {
     if (has('requestStatus') && filters.requestStatus) next.status = filters.requestStatus;
     if (has('actType') && filters.actType) next.act_type = filters.actType;
     if (has('department') && filters.departmentId) next.department_id = filters.departmentId;
+    if (has('mol') && filters.molId) next.mol_id = filters.molId;
     return next;
   }, [activeReport, filters, has]);
 
@@ -337,6 +342,13 @@ const ReportsPage: React.FC = () => {
         setDepartments(res.data.results || []);
       } catch { setDepartments([]); }
     })();
+  }, [activeReport?.key, has]);
+
+  useEffect(() => {
+    if (!activeReport || !has('mol')) { setMols([]); return; }
+    api.get<MolOption[]>('/inventory/mols/')
+      .then((res) => setMols(res.data || []))
+      .catch(() => setMols([]));
   }, [activeReport?.key, has]);
 
   const topCategories = useMemo(() => categories.filter((c: any) => !c.parent), [categories]);
@@ -498,6 +510,19 @@ const ReportsPage: React.FC = () => {
             value={filters.departmentId}
             onChange={(e) => setFilter('departmentId', e.target.value)}
             options={[{ value: '', label: 'Все подразделения' }, ...departments.map((d) => ({ value: d.id, label: d.name }))]}
+          />
+        )}
+        {has('mol') && (
+          <SelectField
+            value={filters.molId}
+            onChange={(e) => setFilter('molId', e.target.value)}
+            options={[
+              { value: '', label: 'Все МОЛ' },
+              ...mols.map((mol) => ({
+                value: mol.id,
+                label: `${mol.name}${mol.department_name ? ` · ${mol.department_name}` : ''}`,
+              })),
+            ]}
           />
         )}
         {activeFilterCount > 0 && (

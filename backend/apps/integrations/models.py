@@ -15,6 +15,7 @@ class SyncLog(models.Model):
             ('RUNNING', _('Выполняется')),
             ('SUCCESS', _('Успешно')),
             ('FAILED', _('Ошибка')),
+            ('SKIPPED', _('Не выполнено')),
         ],
         default='RUNNING',
     )

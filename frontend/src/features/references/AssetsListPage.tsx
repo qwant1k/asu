@@ -8,6 +8,7 @@ import {
   C, PageHeader, Btn, Th, Td, Badge, Tabs, Drawer, InputField, SelectField,
   Spinner, EmptyState, Panel, StatCard, hoverRow,
 } from '../../shared/ui/primitives';
+import { AnimatePresence, motion } from '../../shared/ui/animated/animations';
 import AssetLink from '../../shared/components/AssetLink';
 
 type TabKey = 'TMZ' | 'OS' | 'NMA';
@@ -19,9 +20,9 @@ type SortField =
   | 'category__name'
   | 'group__name'
   | 'unit_of_measure'
-  | 'warehouse_stock__warehouse__name'
-  | 'warehouse_stock__quantity'
-  | 'warehouse_stock__total_amount'
+  | 'warehouse_stocks__warehouse__name'
+  | 'warehouse_stocks__quantity'
+  | 'warehouse_stocks__total_amount'
   | 'unit_price'
   | 'created_at';
 
@@ -38,9 +39,9 @@ const SORT_OPTIONS: { value: SortField; label: string }[] = [
   { value: 'category__name', label: 'Категория' },
   { value: 'group__name', label: 'Группа' },
   { value: 'unit_of_measure', label: 'Ед. изм.' },
-  { value: 'warehouse_stock__warehouse__name', label: 'Склад' },
-  { value: 'warehouse_stock__quantity', label: 'Остаток' },
-  { value: 'warehouse_stock__total_amount', label: 'Сумма' },
+  { value: 'warehouse_stocks__warehouse__name', label: 'Склад' },
+  { value: 'warehouse_stocks__quantity', label: 'Остаток' },
+  { value: 'warehouse_stocks__total_amount', label: 'Сумма' },
   { value: 'unit_price', label: 'Цена' },
   { value: 'created_at', label: 'Дата создания' },
 ];
@@ -78,7 +79,7 @@ const rowSelectStyle: React.CSSProperties = {
   padding: '7px 9px',
   border: `1px solid ${C.inputBorder}`,
   borderRadius: C.radiusSm,
-  background: 'rgba(255, 255, 255, 0.86)',
+  backgroundColor: 'rgba(255, 255, 255, 0.96)',
   color: C.text,
   outline: 'none',
   fontSize: 12,
@@ -391,7 +392,8 @@ const AssetsListPage: React.FC = () => {
       await api.delete(`/references/asset-categories/${category.id}/`);
       if (groupFilter === String(category.id)) setGroupFilter('');
       if (categoryFilter === String(category.id)) setCategoryFilter('');
-      fetchData();
+      setCategories((prev) => prev.filter((c) => c.id !== category.id));
+      setTimeout(() => fetchData(), 220);
     } catch {
       setErrorMsg('Не удалось удалить группу: она может использоваться в позициях');
       setDrawerOpen(true);
@@ -567,6 +569,8 @@ const AssetsListPage: React.FC = () => {
             <div style={{ flex: '0 0 230px' }}>
               <button
                 type="button"
+                className={`asset-group-card${!groupFilter ? ' is-active' : ''}`}
+                data-asset-type={activeTab}
                 onClick={() => setGroupFilter('')}
                 style={{
                   ...groupButtonBase,
@@ -585,6 +589,8 @@ const AssetsListPage: React.FC = () => {
             <div style={{ flex: '0 0 230px' }}>
               <button
                 type="button"
+                className={`asset-group-card${groupFilter === EMPTY_FILTER ? ' is-active' : ''}`}
+                data-asset-type={activeTab}
                 onClick={() => setGroupFilter(EMPTY_FILTER)}
                 style={{
                   ...groupButtonBase,
@@ -602,12 +608,16 @@ const AssetsListPage: React.FC = () => {
 
             {categories.length === 0 ? (
               <EmptyState text="Группы не созданы" />
-            ) : categories.map((category) => {
+            ) : (
+              <AnimatePresence>
+              {categories.map((category) => {
               const isActive = groupFilter === String(category.id);
               return (
-                <div key={category.id} style={{ flex: '0 0 250px', position: 'relative' }}>
+                <motion.div key={category.id} initial={{ opacity: 0, scale: 0.98 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} transition={{ duration: 0.2 }} style={{ flex: '0 0 250px', position: 'relative' }}>
                   <button
                     type="button"
+                    className={`asset-group-card${isActive ? ' is-active' : ''}`}
+                    data-asset-type={activeTab}
                     onClick={() => setGroupFilter(String(category.id))}
                     style={{
                       ...groupButtonBase,
@@ -634,9 +644,11 @@ const AssetsListPage: React.FC = () => {
                       <DeleteOutlined />
                     </button>
                   </div>
-                </div>
+                </motion.div>
               );
             })}
+              </AnimatePresence>
+            )}
           </div>
         </Panel>
 
@@ -672,6 +684,7 @@ const AssetsListPage: React.FC = () => {
                   {assets.map((asset) => (
                     <tr
                       key={asset.id}
+                      className="asset-list-row"
                       onMouseEnter={(event) => hoverRow(event, true)}
                       onMouseLeave={(event) => hoverRow(event, false)}
                       style={{ transition: `background 0.18s ${C.ease}` }}

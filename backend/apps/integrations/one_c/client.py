@@ -70,23 +70,13 @@ class OneCIntegrationClient:
         """
         Получить список активов из 1С по типу (TMZ / OS / NMA).
 
-        ЗАГЛУШКА: возвращает тестовые данные.
+        В отключённом режиме реальные и тестовые финансовые данные не возвращаются.
         TODO: реализовать через HTTP API или COM-объект 1С после
               предоставления технических данных Заказчиком.
         """
-        self._stub_warning('get_assets_from_1c')
-        return [
-            OneCAsset(
-                source_id='STUB-001',
-                name=f'Тестовый актив {asset_type} 001',
-                asset_type=asset_type,
-                inventory_number='ИНВ-0001' if asset_type != 'TMZ' else None,
-                unit_price=15000.00,
-                quantity=5.0,
-                balance_date='2024-01-01',
-                useful_life_months=60 if asset_type != 'TMZ' else None,
-            )
-        ]
+        if not self.enabled:
+            raise RuntimeError('Интеграция с 1С не настроена')
+        raise NotImplementedError('Технический контракт 1С ещё не реализован')
 
     def sync_assets(self, asset_type: str) -> dict:
         """
@@ -99,6 +89,8 @@ class OneCIntegrationClient:
         Returns:
             dict: {'created': int, 'updated': int, 'errors': list}
         """
+        if self.enabled:
+            raise NotImplementedError('Технический контракт 1С ещё не реализован')
         self._stub_warning('sync_assets')
         return {
             'created': 0,
@@ -116,12 +108,10 @@ class OneCIntegrationClient:
         ЗАГЛУШКА: логирует событие, не отправляет данные в 1С.
         TODO: реализовать отправку в 1С после настройки интеграции.
         """
-        self._stub_warning('notify_writeoff_to_1c')
-        logger.info(
-            f"[1С ЗАГЛУШКА] Уведомление о списании: акт={act_number}, "
-            f"активы={asset_ids}. Реальная отправка в 1С не выполнена."
-        )
-        return True
+        if not self.enabled:
+            self._stub_warning('notify_writeoff_to_1c')
+            return False
+        raise NotImplementedError('Технический контракт 1С ещё не реализован')
 
     def get_balance_data(self, asset_type: str, date: str) -> list[dict]:
         """
@@ -130,8 +120,9 @@ class OneCIntegrationClient:
         ЗАГЛУШКА: возвращает пустой список.
         TODO: реализовать запрос к 1С.
         """
-        self._stub_warning('get_balance_data')
-        return []
+        if not self.enabled:
+            raise RuntimeError('Интеграция с 1С не настроена')
+        raise NotImplementedError('Технический контракт 1С ещё не реализован')
 
 
 # Глобальный экземпляр клиента

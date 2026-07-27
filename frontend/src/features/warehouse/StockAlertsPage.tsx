@@ -1,4 +1,5 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+﻿import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   AppstoreOutlined,
   CloseOutlined,
@@ -37,6 +38,8 @@ import {
   Th,
   hoverRow,
 } from '../../shared/ui/primitives';
+import { AnimatePresence } from '../../shared/ui/animated/animations';
+import AnimatedRow from '../../shared/ui/animated/AnimatedRow';
 
 interface AlertForm {
   name: string;
@@ -387,6 +390,7 @@ function DragPicker({
 }
 
 const StockAlertsPage: React.FC = () => {
+  const navigate = useNavigate();
   const [rules, setRules] = useState<StockAlertRule[]>([]);
   const [users, setUsers] = useState<User[]>([]);
   const [groups, setGroups] = useState<AssetCategory[]>([]);
@@ -481,9 +485,10 @@ const StockAlertsPage: React.FC = () => {
     if (!deleteItem) return;
     try {
       await api.delete(`/assets/stock-alert-rules/${deleteItem.id}/`);
-      setDeleteItem(null);
-      fetchData();
+      setRules((prev) => prev.filter((r) => r.id !== deleteItem.id));
     } catch {
+      // ignore
+    } finally {
       setDeleteItem(null);
     }
   };
@@ -549,8 +554,9 @@ const StockAlertsPage: React.FC = () => {
                 </tr>
               </thead>
               <tbody>
+                <AnimatePresence>
                 {rules.map((rule) => (
-                  <tr key={rule.id} onMouseEnter={(e) => hoverRow(e, true)} onMouseLeave={(e) => hoverRow(e, false)}>
+                  <AnimatedRow key={rule.id} onMouseEnter={(e) => hoverRow(e, true)} onMouseLeave={(e) => hoverRow(e, false)}>
                     <Td bold>
                       <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                         {rule.active_alert_count > 0 && <WarningOutlined style={{ color: C.danger }} />}
@@ -575,13 +581,35 @@ const StockAlertsPage: React.FC = () => {
                       </div>
                     </Td>
                     <Td>
-                      <div style={{ display: 'flex', gap: 8 }}>
+                      <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                        {rule.active_alert_count > 0 && (
+                          <button
+                            onClick={() => navigate('/documents/incoming-invoices/new')}
+                            title="Создать приходную накладную для пополнения"
+                            style={{
+                              background: C.successBg,
+                              border: `1px solid ${C.success}`,
+                              color: C.success,
+                              borderRadius: C.radiusSm,
+                              padding: '4px 10px',
+                              fontSize: 12,
+                              fontWeight: 700,
+                              cursor: 'pointer',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: 4,
+                            }}
+                          >
+                            <PlusCircleOutlined /> Пополнить
+                          </button>
+                        )}
                         <button onClick={() => openEdit(rule)} title="Изменить" style={{ background: 'none', border: 'none', color: C.accent, cursor: 'pointer' }}><EditOutlined /></button>
                         <button onClick={() => setDeleteItem(rule)} title="Удалить" style={{ background: 'none', border: 'none', color: C.danger, cursor: 'pointer' }}><DeleteOutlined /></button>
                       </div>
                     </Td>
-                  </tr>
+                  </AnimatedRow>
                 ))}
+                </AnimatePresence>
               </tbody>
             </table>
           </div>

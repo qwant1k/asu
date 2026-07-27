@@ -1,18 +1,21 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+﻿import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { EditOutlined } from '@ant-design/icons';
+import { DisconnectOutlined, EditOutlined, UserAddOutlined } from '@ant-design/icons';
 import api from '../../api/axios';
-import type { AssetCard, AssetCategory, PaginatedResponse, UnitOfMeasure, Warehouse } from '../../shared/types';
+import { useAppSelector } from '../../app/hooks';
+import type { AssetCard, AssetCategory, PaginatedResponse, UnitOfMeasure, User, Warehouse } from '../../shared/types';
 import {
-  C, PageHeader, Btn, Panel, Badge, Th, Td, Spinner, EmptyState,
+  C, PageHeader, Btn, Panel, Badge, Th, Td, Spinner, EmptyState, Modal,
   Drawer, InputField, SelectField, hoverRow,
 } from '../../shared/ui/primitives';
+import { formatApiDate, formatApiDateTime } from '../../shared/utils/date';
+import { usePageBreadcrumbs } from '../../shared/navigation/breadcrumbs';
 
 const Row = ({ label, children }: { label: string; children?: React.ReactNode }) => (
-  <div style={{ display: 'flex', gap: 12, padding: '9px 0', borderBottom: `1px solid ${C.rowBorder}` }}>
-    <div style={{ width: 210, fontSize: 12, fontWeight: 650, color: C.secondary, flexShrink: 0 }}>{label}</div>
-    <div style={{ minWidth: 0, fontSize: 13, color: C.heading }}>{children || '—'}</div>
+  <div className="asset-detail-row" style={{ display: 'flex', gap: 12, padding: '10px 12px' }}>
+    <div className="asset-detail-label" style={{ width: 210, fontSize: 12, fontWeight: 700, flexShrink: 0 }}>{label}</div>
+    <div className="asset-detail-value" style={{ minWidth: 0, fontSize: 13, fontWeight: 550 }}>{children || '—'}</div>
   </div>
 );
 
@@ -27,32 +30,49 @@ const formatQuantity = (value: string | number | null | undefined) =>
 const formatMoney = (value: string | number | null | undefined) =>
   `${toNumber(value).toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} тг`;
 
-const formatDate = (value: string | null | undefined) => {
-  if (!value) return '—';
-  const date = new Date(value.includes('T') ? value : `${value}T00:00:00`);
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString('ru-RU');
-};
-
-const formatDateTime = (value: string | null | undefined) => {
-  if (!value) return '—';
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString('ru-RU');
-};
-
 const baseAssetType = (assetType: string) => (assetType === 'REPRESENTATIVE_TMZ' ? 'TMZ' : assetType);
 
 const AssetCardPage: React.FC = () => {
   const { t } = useTranslation();
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const { user } = useAppSelector((state) => state.auth);
   const [card, setCard] = useState<AssetCard | null>(null);
   const [categories, setCategories] = useState<AssetCategory[]>([]);
   const [units, setUnits] = useState<UnitOfMeasure[]>([]);
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   const [loading, setLoading] = useState(true);
   const [editOpen, setEditOpen] = useState(false);
+  const [assignOpen, setAssignOpen] = useState(false);
+  const [assignSaving, setAssignSaving] = useState(false);
+  const [assignError, setAssignError] = useState('');
+
+  const assetBreadcrumbs = useMemo(() => {
+    if (!card) return null;
+    const routeType = card.asset_type === 'REPRESENTATIVE_TMZ'
+      ? 'tmz'
+      : card.asset_type.toLowerCase();
+    const typeLabel = routeType === 'tmz'
+      ? 'ТМЗ'
+      : routeType === 'os'
+        ? 'Основные средства'
+        : 'Нематериальные активы';
+    return [
+      { label: 'Справочники', path: '/references' },
+      { label: typeLabel, path: `/references/assets/${routeType}` },
+      { label: card.name, path: `/assets/${card.id}` },
+    ];
+  }, [card]);
+  usePageBreadcrumbs(assetBreadcrumbs);
+  const [assignUser, setAssignUser] = useState('');
+  const [assignQuantity, setAssignQuantity] = useState('1');
+  const [assignWarehouse, setAssignWarehouse] = useState('');
+  const [assignLocation, setAssignLocation] = useState('');
+  const [users, setUsers] = useState<User[]>([]);
   const [saving, setSaving] = useState(false);
   const [editError, setEditError] = useState('');
+  const [releaseLoading, setReleaseLoading] = useState<number | null>(null);
+  const [releaseError, setReleaseError] = useState('');
 
   const [fName, setFName] = useState('');
   const [fCode, setFCode] = useState('');
@@ -70,6 +90,11 @@ const AssetCardPage: React.FC = () => {
   const [fStockBalanceDate, setFStockBalanceDate] = useState('');
 
   const isTmz = card?.asset_type === 'TMZ' || card?.asset_type === 'REPRESENTATIVE_TMZ';
+  const isAdmin = Boolean(
+    user?.is_superuser
+    || user?.role === 'ADMIN'
+    || (user?.effective_permissions || []).includes('system.admin'),
+  );
 
   const fetchCard = useCallback(async () => {
     setLoading(true);
@@ -110,6 +135,17 @@ const AssetCardPage: React.FC = () => {
   useEffect(() => {
     if (card) fetchDictionaries(card.asset_type);
   }, [card, fetchDictionaries]);
+
+  const fetchUsers = useCallback(async () => {
+    try {
+      const res = await api.get<PaginatedResponse<User>>('/users/', {
+        params: { page_size: 500, is_active: true, ordering: 'last_name' },
+      });
+      setUsers(res.data.results || []);
+    } catch {
+      setUsers([]);
+    }
+  }, []);
 
   const groupOptions = useMemo(
     () => categories.filter((category) => !fCategory || String(category.id) !== fCategory),
@@ -184,6 +220,59 @@ const AssetCardPage: React.FC = () => {
     }
   };
 
+  const openAssign = () => {
+    setAssignUser('');
+    setAssignQuantity('1');
+    setAssignWarehouse(card?.warehouse ? String(card.warehouse) : '');
+    setAssignLocation(card?.stock_location || '');
+    setAssignError('');
+    fetchUsers();
+    setAssignOpen(true);
+  };
+
+  const handleAssign = async () => {
+    if (!card || !assignUser) {
+      setAssignError('Выберите сотрудника');
+      return;
+    }
+    setAssignSaving(true);
+    setAssignError('');
+    try {
+      await api.post('/assets/assignments/', {
+        asset: Number(id),
+        user: Number(assignUser),
+        quantity: Number(assignQuantity) || 1,
+        warehouse: assignWarehouse ? Number(assignWarehouse) : null,
+        location: assignLocation || '',
+      });
+      setAssignOpen(false);
+      await fetchCard();
+    } catch (err: any) {
+      setAssignError(formatError(err));
+    } finally {
+      setAssignSaving(false);
+    }
+  };
+
+  const handleRelease = async (assignmentId: number) => {
+    const reason = window.prompt(
+      'Укажите причину снятия закрепления. Оставьте поле пустым, если пояснение не требуется.',
+      '',
+    );
+    if (reason === null) return;
+    if (!window.confirm('Снять актив с сотрудника? История закрепления будет сохранена.')) return;
+    setReleaseLoading(assignmentId);
+    setReleaseError('');
+    try {
+      await api.post(`/assets/assignments/${assignmentId}/release/`, { reason });
+      await fetchCard();
+    } catch (err: any) {
+      setReleaseError(formatError(err));
+    } finally {
+      setReleaseLoading(null);
+    }
+  };
+
   if (loading) return <Spinner />;
   if (!card) return <EmptyState text={t('common.notFound')} />;
 
@@ -201,7 +290,7 @@ const AssetCardPage: React.FC = () => {
       />
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 360px), 1fr))', gap: 20, marginBottom: 20 }}>
-        <Panel title="Реквизиты">
+        <Panel title="Реквизиты актива" subtitle="Основные сведения и классификация" className="asset-card-panel asset-card-panel--identity">
           <Row label={t('common.name')}>{card.name}</Row>
           <Row label={t('common.code')}>{card.code}</Row>
           <Row label={t('common.type')}><Badge status={card.asset_type_display} /></Row>
@@ -213,7 +302,7 @@ const AssetCardPage: React.FC = () => {
           {card.is_long_term_use && <Row label="ТМЗ длит. пользования"><Badge status="Да" /></Row>}
         </Panel>
 
-        <Panel title="Склад и учет">
+        <Panel title="Склад и учёт" subtitle="Остаток, стоимость и балансовые параметры" className="asset-card-panel asset-card-panel--accounting">
           <Row label="Склад">{card.warehouse_name || 'Не указан'}</Row>
           {card.stock_location && card.stock_location !== card.warehouse_name && (
             <Row label="Место хранения">{card.stock_location}</Row>
@@ -222,23 +311,29 @@ const AssetCardPage: React.FC = () => {
             <strong>{formatQuantity(card.stock_quantity)} {card.unit_of_measure_ref_name || card.unit_of_measure}</strong>
           </Row>
           <Row label="Сумма остатка">{formatMoney(card.stock_total_amount)}</Row>
-          <Row label="Дата остатка">{formatDate(card.stock_balance_date)}</Row>
-          {card.balance_date && <Row label="Дата постановки на баланс">{formatDate(card.balance_date)}</Row>}
+          <Row label="Дата остатка">{formatApiDate(card.stock_balance_date)}</Row>
+          {card.balance_date && <Row label="Дата постановки на баланс">{formatApiDate(card.balance_date)}</Row>}
           {card.useful_life_months != null && <Row label="Срок полезн. использ.">{card.useful_life_months} мес.</Row>}
           {card.depreciation_rate != null && <Row label="Норма амортизации">{card.depreciation_rate}%</Row>}
           <Row label="Активных закреплений">{card.assignments.length}</Row>
           {card.source_1c_id && <Row label="ID в 1С">{card.source_1c_id}</Row>}
-          {card.last_sync_at && <Row label="Последняя синхронизация">{formatDateTime(card.last_sync_at)}</Row>}
+          {card.last_sync_at && <Row label="Последняя синхронизация">{formatApiDateTime(card.last_sync_at)}</Row>}
         </Panel>
       </div>
 
-      <Panel title="Закрепления" noPad style={{ marginBottom: 20 }}>
+      <Panel title="Закрепления" subtitle="Действующие материально ответственные лица" className="asset-card-panel asset-card-panel--assignments" noPad style={{ marginBottom: 20 }}>
+        {releaseError && (
+          <div style={{ background: C.dangerBg, color: C.danger, padding: '10px 14px', fontSize: 12 }}>
+            {releaseError}
+          </div>
+        )}
         {card.assignments.length === 0 ? <EmptyState text="Нет активных закреплений" /> : (
           <div style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 820 }}>
               <thead><tr>
                 <Th>Сотрудник</Th><Th>Подразделение</Th><Th right>Кол-во</Th>
                 <Th>Дата выдачи</Th><Th>Склад</Th><Th>{t('common.status')}</Th>
+                {isAdmin && <Th>Действия</Th>}
               </tr></thead>
               <tbody>
                 {card.assignments.map((assignment) => (
@@ -246,9 +341,20 @@ const AssetCardPage: React.FC = () => {
                     <Td bold>{assignment.user_name}</Td>
                     <Td muted>{assignment.department_name || '—'}</Td>
                     <Td right>{formatQuantity(assignment.quantity)}</Td>
-                    <Td muted>{formatDate(assignment.assigned_at)}</Td>
+                    <Td muted>{formatApiDate(assignment.assigned_at)}</Td>
                     <Td muted>{assignment.warehouse_name || assignment.location || '—'}</Td>
                     <Td><Badge status={assignment.status_display} /></Td>
+                    {isAdmin && (
+                      <Td>
+                        <Btn
+                          variant="danger"
+                          onClick={() => handleRelease(assignment.id)}
+                          loading={releaseLoading === assignment.id}
+                        >
+                          <DisconnectOutlined /> Снять
+                        </Btn>
+                      </Td>
+                    )}
                   </tr>
                 ))}
               </tbody>
@@ -257,7 +363,11 @@ const AssetCardPage: React.FC = () => {
         )}
       </Panel>
 
-      <Panel title="История движений" noPad>
+      <div style={{ marginBottom: 20 }}>
+        <Btn onClick={openAssign}><UserAddOutlined /> Закрепить за сотрудником</Btn>
+      </div>
+
+      <Panel title="История движений" subtitle="Полный хронологический журнал операций" className="asset-card-panel asset-card-panel--movements" noPad>
         {card.movements.length === 0 ? <EmptyState text="Нет движений по позиции" /> : (
           <div style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 920 }}>
@@ -268,7 +378,7 @@ const AssetCardPage: React.FC = () => {
               <tbody>
                 {card.movements.map((movement) => (
                   <tr key={movement.id} onMouseEnter={(event) => hoverRow(event, true)} onMouseLeave={(event) => hoverRow(event, false)}>
-                    <Td muted>{formatDate(movement.performed_at)}</Td>
+                    <Td muted>{formatApiDateTime(movement.performed_at)}</Td>
                     <Td><Badge status={movement.movement_type_display} /></Td>
                     <Td right>{formatQuantity(movement.quantity)}{isTmz ? ` ${card.unit_of_measure}` : ''}</Td>
                     <Td muted>{movement.warehouse_name || '—'}</Td>
@@ -352,6 +462,72 @@ const AssetCardPage: React.FC = () => {
           )}
         </div>
       </Drawer>
+
+      <Modal
+        open={assignOpen}
+        onClose={() => setAssignOpen(false)}
+        title="Закрепить за сотрудником"
+        footer={(
+          <>
+            <Btn variant="secondary" onClick={() => setAssignOpen(false)}>{t('common.cancel')}</Btn>
+            <Btn onClick={handleAssign} loading={assignSaving}>Закрепить</Btn>
+          </>
+        )}
+      >
+        {assignError && (
+          <div style={{ background: C.dangerBg, color: C.danger, padding: '8px 12px', borderRadius: C.radiusSm, fontSize: 12, marginBottom: 14 }}>
+            {assignError}
+          </div>
+        )}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div>
+            <label style={{ fontSize: 12, fontWeight: 700, color: C.heading, display: 'block', marginBottom: 6 }}>Сотрудник *</label>
+            <select
+              value={assignUser}
+              onChange={(e) => setAssignUser(e.target.value)}
+              style={{ width: '100%', padding: '8px 12px', border: `1px solid ${C.inputBorder}`, borderRadius: C.radiusSm, fontSize: 13, minHeight: 38, background: C.glassStrong, outline: 'none' }}
+            >
+              <option value="">Выберите сотрудника</option>
+              {users.map((u) => (
+                <option key={u.id} value={u.id}>{u.full_name || u.username}{u.department_name ? ` · ${u.department_name}` : ''}</option>
+              ))}
+            </select>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <div>
+              <label style={{ fontSize: 12, fontWeight: 700, color: C.heading, display: 'block', marginBottom: 6 }}>Количество</label>
+              <input
+                type="number"
+                min="1"
+                value={assignQuantity}
+                onChange={(e) => setAssignQuantity(e.target.value)}
+                style={{ width: '100%', padding: '8px 12px', border: `1px solid ${C.inputBorder}`, borderRadius: C.radiusSm, fontSize: 13, minHeight: 38, background: C.glassStrong, outline: 'none' }}
+              />
+            </div>
+            <div>
+              <label style={{ fontSize: 12, fontWeight: 700, color: C.heading, display: 'block', marginBottom: 6 }}>Склад</label>
+              <select
+                value={assignWarehouse}
+                onChange={(e) => setAssignWarehouse(e.target.value)}
+                style={{ width: '100%', padding: '8px 12px', border: `1px solid ${C.inputBorder}`, borderRadius: C.radiusSm, fontSize: 13, minHeight: 38, background: C.glassStrong, outline: 'none' }}
+              >
+                <option value="">Не указан</option>
+                {warehouses.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
+              </select>
+            </div>
+          </div>
+          <div>
+            <label style={{ fontSize: 12, fontWeight: 700, color: C.heading, display: 'block', marginBottom: 6 }}>Место хранения</label>
+            <input
+              type="text"
+              value={assignLocation}
+              onChange={(e) => setAssignLocation(e.target.value)}
+              placeholder="Кабинет, полка и т.д."
+              style={{ width: '100%', padding: '8px 12px', border: `1px solid ${C.inputBorder}`, borderRadius: C.radiusSm, fontSize: 13, minHeight: 38, background: C.glassStrong, outline: 'none' }}
+            />
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 };

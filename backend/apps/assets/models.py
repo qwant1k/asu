@@ -16,10 +16,10 @@ from apps.common.mixins import TimestampMixin
 
 class WarehouseStock(TimestampMixin):
     """Остатки на складе."""
-    asset = models.OneToOneField(
+    asset = models.ForeignKey(
         'references.Asset',
         on_delete=models.CASCADE,
-        related_name='warehouse_stock',
+        related_name='warehouse_stocks',
         verbose_name=_('Актив'),
     )
     quantity = models.DecimalField(
@@ -27,6 +27,9 @@ class WarehouseStock(TimestampMixin):
     )
     total_amount = models.DecimalField(
         _('Общая сумма'), max_digits=15, decimal_places=2, default=0,
+    )
+    unit_price = models.DecimalField(
+        _('Учётная цена за единицу'), max_digits=15, decimal_places=2, default=0,
     )
     balance_date = models.DateField(
         _('Дата остатка'), blank=True, null=True,
@@ -46,6 +49,16 @@ class WarehouseStock(TimestampMixin):
     class Meta:
         verbose_name = _('Остаток на складе')
         verbose_name_plural = _('Остатки на складе')
+        constraints = [
+            models.UniqueConstraint(fields=['asset', 'warehouse'], name='unique_asset_warehouse_stock'),
+            models.UniqueConstraint(
+                fields=['asset'],
+                condition=models.Q(warehouse__isnull=True),
+                name='unique_asset_stock_without_warehouse',
+            ),
+            models.CheckConstraint(check=models.Q(quantity__gte=0), name='warehouse_stock_quantity_nonnegative'),
+            models.CheckConstraint(check=models.Q(total_amount__gte=0), name='warehouse_stock_total_nonnegative'),
+        ]
 
     def __str__(self):
         return f'{self.asset.name} — {self.quantity} {self.asset.unit_of_measure}'
@@ -56,8 +69,8 @@ class WarehouseStock(TimestampMixin):
         super().save(*args, **kwargs)
 
     def recalculate_total(self):
-        """Пересчёт общей суммы на основе количества и цены актива."""
-        self.total_amount = self.quantity * self.asset.unit_price
+        """Пересчёт общей суммы на основе складской учётной цены."""
+        self.total_amount = self.quantity * self.unit_price
         self.save(update_fields=['total_amount', 'updated_at'])
 
 
@@ -86,6 +99,20 @@ class AssetAssignment(models.Model):
         related_name='assignments_issued',
         verbose_name=_('Выдал'),
     )
+    released_at = models.DateTimeField(
+        _('Снято с закрепления'), null=True, blank=True,
+    )
+    released_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name='assignments_released',
+        verbose_name=_('Снял с закрепления'),
+    )
+    release_reason = models.TextField(
+        _('Причина снятия закрепления'), blank=True, default='',
+    )
     warehouse = models.ForeignKey(
         'references.Warehouse',
         on_delete=models.SET_NULL,
@@ -108,6 +135,9 @@ class AssetAssignment(models.Model):
         verbose_name = _('Закрепление актива')
         verbose_name_plural = _('Закрепления активов')
         ordering = ['-assigned_at']
+        constraints = [
+            models.CheckConstraint(check=models.Q(quantity__gt=0), name='asset_assignment_quantity_positive'),
+        ]
 
     def __str__(self):
         return f'{self.asset.name} → {self.user.get_short_name()}'
@@ -185,6 +215,9 @@ class StockMovement(models.Model):
         verbose_name = _('Движение актива')
         verbose_name_plural = _('Движения активов')
         ordering = ['-performed_at']
+        constraints = [
+            models.CheckConstraint(check=models.Q(unit_price__gte=0), name='stock_movement_price_nonnegative'),
+        ]
 
     def __str__(self):
         return (

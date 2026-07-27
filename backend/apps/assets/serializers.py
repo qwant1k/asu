@@ -1,4 +1,4 @@
-"""Сериализаторы активов и склада ИС «АСУ»."""
+﻿"""Сериализаторы активов и склада ИС «АСУ»."""
 
 from rest_framework import serializers
 from apps.references.models import Asset, AssetCategory, Warehouse
@@ -28,7 +28,7 @@ class WarehouseStockSerializer(serializers.ModelSerializer):
     group_name = serializers.CharField(source='asset.group.name', read_only=True, default='')
     warehouse_name = serializers.CharField(source='warehouse.name', read_only=True, default='')
     unit_price = serializers.DecimalField(
-        source='asset.unit_price', max_digits=15, decimal_places=2, read_only=True,
+        max_digits=15, decimal_places=2, read_only=True,
     )
 
     class Meta:
@@ -64,6 +64,9 @@ class AssetAssignmentSerializer(serializers.ModelSerializer):
     assigned_by_name = serializers.CharField(
         source='assigned_by.get_short_name', read_only=True, default='',
     )
+    released_by_name = serializers.CharField(
+        source='released_by.get_short_name', read_only=True, default='',
+    )
     warehouse_name = serializers.CharField(source='warehouse.name', read_only=True, default='')
     status_display = serializers.CharField(source='get_status_display', read_only=True)
 
@@ -76,6 +79,11 @@ class AssetAssignmentSerializer(serializers.ModelSerializer):
             'quantity', 'assigned_at',
             'assigned_by', 'assigned_by_name', 'warehouse', 'warehouse_name', 'location',
             'status', 'status_display',
+            'released_at', 'released_by', 'released_by_name', 'release_reason',
+        ]
+        read_only_fields = [
+            'assigned_at', 'assigned_by', 'status',
+            'released_at', 'released_by', 'release_reason',
         ]
 
 

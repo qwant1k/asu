@@ -10,11 +10,12 @@
     "eject": "react-scripts eject"
   },
   "dependencies": {
+    "@ant-design/icons": "^5.2.6",
     "@reduxjs/toolkit": "^2.0.1",
     "antd": "^5.12.8",
-    "@ant-design/icons": "^5.2.6",
     "axios": "^1.6.5",
     "dayjs": "^1.11.10",
+    "framer-motion": "^11.18.2",
     "i18next": "^23.7.16",
     "i18next-browser-languagedetector": "^7.2.0",
     "react": "^18.2.0",
@@ -36,7 +37,15 @@
     "@types/react-dom": "^18.2.0"
   },
   "browserslist": {
-    "production": [">0.2%", "not dead", "not op_mini all"],
-    "development": ["last 1 chrome version", "last 1 firefox version", "last 1 safari version"]
+    "production": [
+      ">0.2%",
+      "not dead",
+      "not op_mini all"
+    ],
+    "development": [
+      "last 1 chrome version",
+      "last 1 firefox version",
+      "last 1 safari version"
+    ]
   }
 }

@@ -133,6 +133,7 @@ class AssetRequestListSerializer(PendingMyApprovalMixin, serializers.ModelSerial
             'pending_my_approval', 'pending_my_issue', 'required_approver_role',
             'issue_responsibles', 'issue_responsible_names', 'created_at', 'updated_at',
             'deletion_requested', 'deletion_requested_by', 'deletion_requested_by_name', 'deletion_requested_at',
+            'receipt_confirmed_at',
         ]
 
 
@@ -184,6 +185,7 @@ class AssetRequestDetailSerializer(PendingMyApprovalMixin, serializers.ModelSeri
             'pending_my_approval', 'pending_my_issue', 'required_approver_role',
             'created_at', 'updated_at',
             'deletion_requested', 'deletion_requested_by', 'deletion_requested_by_name', 'deletion_requested_at',
+            'receipt_confirmed_at',
         ]
 
 

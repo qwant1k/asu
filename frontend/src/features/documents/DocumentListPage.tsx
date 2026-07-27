@@ -33,6 +33,7 @@ import {
   hoverRow,
 } from '../../shared/ui/primitives';
 import AssetLink from '../../shared/components/AssetLink';
+import { usePageBreadcrumbs } from '../../shared/navigation/breadcrumbs';
 
 type DocumentKind = 'incoming' | 'writeOff' | 'petition' | 'protocol' | 'transfer';
 type ActionKind = 'approve' | 'revision' | 'reject' | 'changeRequest';
@@ -542,6 +543,26 @@ const DocumentListPage: React.FC = () => {
   const [actionComment, setActionComment] = useState('');
   const [editingDetail, setEditingDetail] = useState(false);
   const [referencePicker, setReferencePicker] = useState<ReferencePickerState | null>(null);
+
+  const documentBreadcrumbs = useMemo(() => {
+    const items = [
+      { label: 'Документы', path: '/documents' },
+      { label: config.title, path: config.basePath },
+    ];
+    if (isCreateMode) {
+      items.push({ label: config.createTitle, path: `${config.basePath}/new` });
+    } else if (detailId) {
+      const documentLabel = detail?.number
+        ? `${config.documentName} №${detail.number}`
+        : `${config.documentName} #${detailId}`;
+      items.push({ label: documentLabel, path: `${config.basePath}/${detailId}` });
+      if (editingDetail) {
+        items.push({ label: 'Редактирование', path: `${config.basePath}/${detailId}` });
+      }
+    }
+    return items;
+  }, [config, detail?.number, detailId, editingDetail, isCreateMode]);
+  usePageBreadcrumbs(documentBreadcrumbs);
 
   const fetchDictionaries = useCallback(async () => {
     const [assetsRes, counterpartiesRes, usersRes, warehousesRes, petitionsRes] = await Promise.allSettled([

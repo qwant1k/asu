@@ -16,9 +16,11 @@ from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.permissions import AllowAny, BasePermission, IsAuthenticated, SAFE_METHODS
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from rest_framework.throttling import ScopedRateThrottle
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from apps.common.constants import ROLE_CHOICES
+from apps.common.trash import SoftDeleteViewSetMixin
 
 from .filters import UserFilter
 from .access import ACCESS_DEFINITIONS, ROLE_DEFAULT_ACCESS, effective_access_detail, has_access, normalize_position
@@ -128,6 +130,8 @@ class LoginView(APIView):
     """Authenticate user and issue JWT tokens."""
 
     permission_classes = [AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'login'
 
     def post(self, request):
         serializer = LoginSerializer(data=request.data, context={'request': request})
@@ -178,7 +182,7 @@ class CurrentUserView(generics.RetrieveUpdateAPIView):
         return context
 
 
-class UserViewSet(viewsets.ModelViewSet):
+class UserViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
     """User CRUD for admins."""
 
     queryset = User.objects.select_related('department', 'position_ref', 'supervisor').all()
@@ -436,7 +440,7 @@ class AccessMatrixExportView(APIView):
         return response
 
 
-class PositionAccessRuleViewSet(viewsets.ModelViewSet):
+class PositionAccessRuleViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
     """CRUD for permissions inherited by position."""
 
     queryset = PositionAccessRule.objects.all()
@@ -447,7 +451,7 @@ class PositionAccessRuleViewSet(viewsets.ModelViewSet):
     ordering = ['position', 'permission_code']
 
 
-class UserAccessOverrideViewSet(viewsets.ModelViewSet):
+class UserAccessOverrideViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
     """CRUD for personal permission overrides."""
 
     queryset = UserAccessOverride.objects.select_related('user').all()
@@ -459,7 +463,7 @@ class UserAccessOverrideViewSet(viewsets.ModelViewSet):
     ordering = ['user__last_name', 'user__first_name', 'permission_code']
 
 
-class DepartmentViewSet(viewsets.ModelViewSet):
+class DepartmentViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
     """Department CRUD."""
 
     queryset = Department.objects.select_related('head', 'parent').all()

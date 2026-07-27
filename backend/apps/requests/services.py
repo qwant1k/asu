@@ -3,6 +3,7 @@
 from decimal import Decimal
 
 from django.db import transaction
+from django.db import models
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
@@ -16,12 +17,11 @@ from apps.common.constants import (
     NOTIFICATION_REQUEST_TO_APPROVE,
     NOTIFICATION_REQUEST_TO_ISSUE,
     REQUEST_APPROVED,
-    REQUEST_APPROVED_AHS_HEAD,
-    REQUEST_APPROVED_MOL,
     REQUEST_APPROVED_SUPERVISOR,
     REQUEST_CANCELLED,
     REQUEST_DRAFT,
     REQUEST_EXECUTED,
+    REQUEST_PARTIALLY_ISSUED,
     REQUEST_PENDING_SUPERVISOR,
     REQUEST_REJECTED,
     REQUEST_SENT_FOR_REVISION,
@@ -32,7 +32,7 @@ from apps.common.constants import (
 )
 from apps.users.access import APPROVER_ROLE_ACCESS, has_access
 
-from .models import AssetRequest, RequestApproval
+from .models import AssetRequest, IssueOperation, RequestApproval
 
 
 class RequestWorkflowService:
@@ -41,16 +41,22 @@ class RequestWorkflowService:
     PENDING_STATUSES = (
         REQUEST_PENDING_SUPERVISOR,
         REQUEST_APPROVED_SUPERVISOR,
-        REQUEST_APPROVED_MOL,
-        REQUEST_APPROVED_AHS_HEAD,
     )
     EDITABLE_STATUSES = (REQUEST_DRAFT, REQUEST_SENT_FOR_REVISION)
     RESET_ACTIONS = (APPROVAL_SENT_TO_REVISION, APPROVAL_WITHDRAWN)
     ISSUE_ROLES = (ROLE_AHS_WORKER, ROLE_AHS_HEAD)
 
     @staticmethod
+    def _lock(request_obj: AssetRequest) -> AssetRequest:
+        """Перечитать заявку с блокировкой до конца текущей транзакции."""
+        AssetRequest.objects.select_for_update().get(pk=request_obj.pk)
+        request_obj.refresh_from_db()
+        return request_obj
+
+    @staticmethod
     @transaction.atomic
     def submit(request_obj: AssetRequest, user=None):
+        request_obj = RequestWorkflowService._lock(request_obj)
         if request_obj.status not in RequestWorkflowService.EDITABLE_STATUSES:
             raise ValueError(_('Отправить на согласование можно только черновик или заявку на корректировке'))
 
@@ -84,9 +90,26 @@ class RequestWorkflowService:
     def get_approval_roles(request_obj: AssetRequest):
         """Упорядоченный маршрут согласования: список (роль, только_руководитель).
 
-        Заявка сначала согласуется руководителем подразделения создателя,
-        затем руководителем АХС, который назначает ответственного за выдачу.
+        Если для вида заявки настроены этапы через ApprovalStep — используются они.
+        Иначе — маршрут по умолчанию: руководитель подразделения, затем АХС.
         """
+        from apps.common.trash import exclude_trashed
+        from apps.requests.models import ApprovalStep
+
+        steps = exclude_trashed(
+            ApprovalStep.objects.filter(
+                request_type=request_obj.request_type,
+                is_active=True,
+            )
+        ).order_by('order')
+
+        configured = [
+            (step.approver_role, step.requires_supervisor)
+            for step in steps
+        ]
+        if configured:
+            return configured
+
         return [
             (ROLE_DEPT_HEAD, True),
             (ROLE_AHS_HEAD, False),
@@ -196,13 +219,35 @@ class RequestWorkflowService:
             return [supervisor] if supervisor and supervisor.is_active else []
 
         from apps.users.models import User
+        from django.db.models import Q
 
         access_code = APPROVER_ROLE_ACCESS.get(required_role)
-        users = list(User.objects.filter(is_active=True))
-        return [
-            user for user in users
-            if user.role == required_role or (access_code and has_access(user, access_code))
-        ]
+        qs = User.objects.filter(is_active=True, role=required_role)
+        if access_code:
+            from apps.common.trash import exclude_trashed
+            from apps.users.models import UserAccessOverride
+            override_user_ids = exclude_trashed(
+                UserAccessOverride.objects.filter(
+                    permission_code=access_code,
+                    mode='GRANT',
+                )
+            ).values_list('user_id', flat=True)
+            from apps.users.models import PositionAccessRule
+            allowed_positions = exclude_trashed(
+                PositionAccessRule.objects.filter(
+                    permission_code=access_code,
+                    is_allowed=True,
+                    is_active=True,
+                )
+            ).values_list('position', flat=True)
+            position_user_ids = User.objects.filter(
+                position__in=allowed_positions,
+            ).values_list('id', flat=True)
+            qs = qs | User.objects.filter(
+                id__in=list(override_user_ids) + list(position_user_ids),
+                is_active=True,
+            )
+        return list(qs.distinct())
 
     @staticmethod
     def notify_current_approvers(request_obj: AssetRequest):
@@ -279,7 +324,7 @@ class RequestWorkflowService:
 
     @staticmethod
     def check_can_issue(request_obj: AssetRequest, user):
-        if request_obj.status != REQUEST_APPROVED:
+        if request_obj.status not in (REQUEST_APPROVED, REQUEST_PARTIALLY_ISSUED):
             raise ValueError(_('Выдача доступна только для согласованной заявки'))
 
         if has_access(user, 'system.admin'):
@@ -302,6 +347,7 @@ class RequestWorkflowService:
     @staticmethod
     @transaction.atomic
     def approve(request_obj: AssetRequest, approver, issue_responsible_ids=None):
+        request_obj = RequestWorkflowService._lock(request_obj)
         RequestWorkflowService.check_can_approve(request_obj, approver)
 
         RequestApproval.objects.create(
@@ -334,6 +380,7 @@ class RequestWorkflowService:
     @staticmethod
     @transaction.atomic
     def reject(request_obj: AssetRequest, approver, comment: str = ''):
+        request_obj = RequestWorkflowService._lock(request_obj)
         if request_obj.status in (
             REQUEST_DRAFT,
             REQUEST_EXECUTED,
@@ -365,6 +412,7 @@ class RequestWorkflowService:
     @staticmethod
     @transaction.atomic
     def send_to_revision(request_obj: AssetRequest, approver, comment: str = ''):
+        request_obj = RequestWorkflowService._lock(request_obj)
         if request_obj.status in (
             REQUEST_DRAFT,
             REQUEST_SENT_FOR_REVISION,
@@ -402,6 +450,7 @@ class RequestWorkflowService:
     @staticmethod
     @transaction.atomic
     def cancel(request_obj: AssetRequest, user):
+        request_obj = RequestWorkflowService._lock(request_obj)
         is_admin = has_access(user, 'system.admin')
         if is_admin:
             if request_obj.status == REQUEST_EXECUTED:
@@ -421,14 +470,32 @@ class RequestWorkflowService:
     @staticmethod
     @transaction.atomic
     def withdraw(request_obj: AssetRequest, user):
+        request_obj = RequestWorkflowService._lock(request_obj)
         if request_obj.initiator_id != user.id:
             raise ValueError(_('Отозвать заявку может только инициатор'))
 
         if request_obj.status not in RequestWorkflowService.PENDING_STATUSES:
-            raise ValueError(_('Отозвать можно только заявку, отправленную на согласование'))
+            raise ValueError(_('Отозвать можно только заявку, находящуюся на согласовании'))
 
-        if RequestWorkflowService.completed_step_count(request_obj) > 0:
-            raise ValueError(_('Заявку уже начали согласовывать, отзыв недоступен'))
+        # Notify all users who already approved in this cycle
+        cycle_started_at = RequestWorkflowService.current_cycle_started_at(request_obj)
+        approved_qs = request_obj.approvals.filter(
+            action=APPROVAL_APPROVED,
+            signed_at__isnull=False,
+        )
+        if cycle_started_at:
+            approved_qs = approved_qs.filter(created_at__gt=cycle_started_at)
+
+        from apps.notifications.services import NotificationService
+        for approval in approved_qs.select_related('approver'):
+            if approval.approver_id != user.id:
+                NotificationService.send(
+                    recipient=approval.approver,
+                    notification_type=NOTIFICATION_REQUEST_STATUS,
+                    title=_('Заявка №%(number)s отозвана инициатором') % {'number': request_obj.number},
+                    body=_('Инициатор отозвал заявку после вашего согласования.'),
+                    related_object=request_obj,
+                )
 
         RequestApproval.objects.create(
             request=request_obj,
@@ -440,11 +507,13 @@ class RequestWorkflowService:
 
         request_obj.status = REQUEST_DRAFT
         request_obj.save(update_fields=['status', 'updated_at'])
+        request_obj.issue_responsibles.clear()
         return request_obj
 
     @staticmethod
     @transaction.atomic
     def issue_items(request_obj: AssetRequest, user, items_data):
+        request_obj = RequestWorkflowService._lock(request_obj)
         RequestWorkflowService.check_can_issue(request_obj, user)
 
         if not items_data:
@@ -455,7 +524,9 @@ class RequestWorkflowService:
 
         items_map = {
             item.id: item
-            for item in request_obj.items.select_related('requested_group', 'issued_asset', 'asset')
+            for item in request_obj.items.select_for_update().select_related(
+                'requested_group', 'issued_asset', 'asset',
+            )
         }
         recipient = request_obj.to_user or request_obj.initiator
 
@@ -463,6 +534,7 @@ class RequestWorkflowService:
             item_id = row.get('id')
             issued_asset_id = row.get('issued_asset')
             quantity_issued = row.get('quantity_issued')
+            warehouse_id = row.get('warehouse')
 
             if item_id not in items_map:
                 raise ValueError(_('Позиция заявки не найдена'))
@@ -483,45 +555,78 @@ class RequestWorkflowService:
             if quantity <= 0:
                 raise ValueError(_('Количество выдачи должно быть больше нуля'))
 
-            if quantity > request_item.quantity_requested:
-                raise ValueError(_('Количество выдачи не может превышать запрошенное'))
+            already_issued = request_item.issue_operations.aggregate(
+                total=models.Sum('quantity'),
+            )['total'] or Decimal('0')
+            remaining = request_item.quantity_requested - already_issued
+            if quantity > remaining:
+                raise ValueError(
+                    _('Количество выдачи превышает остаток по заявке. Доступно к выдаче: %(remaining)s')
+                    % {'remaining': remaining}
+                )
 
             if issued_asset.asset_type in ('OS', 'NMA') and quantity != Decimal('1'):
                 raise ValueError(_('Для ОС и НМА выдача возможна только по одной единице на карточку'))
 
-            StockService.issue_stock(
+            movement = StockService.issue_stock(
                 asset=issued_asset,
                 quantity=quantity,
                 to_user=recipient,
                 document=request_obj,
                 performed_by=user,
+                warehouse_id=warehouse_id,
             )
 
             request_item.issued_asset = issued_asset
-            request_item.quantity_issued = quantity
+            request_item.quantity_issued = already_issued + quantity
             if request_item.asset_id is None:
                 request_item.asset = issued_asset
             request_item.save(update_fields=['issued_asset', 'quantity_issued', 'asset'])
+            IssueOperation.objects.create(
+                request_item=request_item,
+                asset=issued_asset,
+                warehouse=movement.warehouse,
+                movement=movement,
+                quantity=quantity,
+                performed_by=user,
+            )
 
-        if request_obj.items.filter(quantity_issued__isnull=True).exists():
-            raise ValueError(_('Не все позиции заявки выданы'))
+        unissued = request_obj.items.filter(
+            models.Q(quantity_issued__isnull=True)
+            | models.Q(quantity_issued__lt=models.F('quantity_requested'))
+        ).exists()
 
-        request_obj.status = REQUEST_EXECUTED
-        request_obj.save(update_fields=['status', 'updated_at'])
-        RequestWorkflowService.notify_initiator(
-            request_obj,
-            _('Заявка №%(number)s выдана') % {'number': request_obj.number},
-            _('Товары по заявке выданы ответственным сотрудником АХС.'),
-        )
+        if unissued:
+            request_obj.status = REQUEST_PARTIALLY_ISSUED
+            request_obj.save(update_fields=['status', 'updated_at'])
+            RequestWorkflowService.notify_initiator(
+                request_obj,
+                _('Заявка №%(number)s частично выдана') % {'number': request_obj.number},
+                _('Часть позиций по заявке выдана. Остальные позиции ожидают выдачи.'),
+            )
+        else:
+            request_obj.status = REQUEST_EXECUTED
+            request_obj.save(update_fields=['status', 'updated_at'])
+            RequestWorkflowService.notify_initiator(
+                request_obj,
+                _('Заявка №%(number)s выдана') % {'number': request_obj.number},
+                _('Товары по заявке выданы ответственным сотрудником АХС.'),
+            )
         return request_obj
 
     @staticmethod
     @transaction.atomic
     def confirm_receipt(request_obj: AssetRequest, user):
+        request_obj = RequestWorkflowService._lock(request_obj)
         if request_obj.status != REQUEST_EXECUTED:
             raise ValueError(_('Подтверждение возможно только после фактической выдачи по заявке'))
 
         if request_obj.initiator != user:
             raise ValueError(_('Подтвердить получение может только инициатор'))
 
+        if request_obj.receipt_confirmed_at:
+            raise ValueError(_('Получение уже подтверждено'))
+
+        request_obj.receipt_confirmed_at = timezone.now()
+        request_obj.save(update_fields=['receipt_confirmed_at', 'updated_at'])
         return request_obj

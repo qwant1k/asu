@@ -1,7 +1,7 @@
 ﻿"""Модели заявок ИС «АСУ»."""
 
 from django.conf import settings
-from django.db import models
+from django.db import models, transaction
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
@@ -76,6 +76,11 @@ class AssetRequest(TimestampMixin):
         null=True,
         blank=True,
     )
+    receipt_confirmed_at = models.DateTimeField(
+        _('Получение подтверждено'),
+        null=True,
+        blank=True,
+    )
 
     class Meta:
         verbose_name = _('Заявка')
@@ -88,22 +93,13 @@ class AssetRequest(TimestampMixin):
     def save(self, *args, **kwargs):
         """Автоприсвоение номера при первом сохранении."""
         if not self.number:
-            year = timezone.now().year
-            last = AssetRequest.objects.filter(
-                number__endswith=f'/{year}'
-            ).order_by('-number').first()
+            from apps.common.numbering import next_number
 
-            if last and last.number:
-                try:
-                    last_num = int(last.number.split('/')[0])
-                except (ValueError, IndexError):
-                    last_num = 0
-            else:
-                last_num = 0
+            with transaction.atomic():
+                self.number = next_number('asset-request', timezone.now().year)
+                return super().save(*args, **kwargs)
 
-            self.number = f'{last_num + 1:03d}/{year}'
-
-        super().save(*args, **kwargs)
+        return super().save(*args, **kwargs)
 
 
 class AssetRequestItem(models.Model):
@@ -196,6 +192,58 @@ class RequestApproval(models.Model):
             f'{self.approver.get_short_name()} — '
             f'{self.get_action_display()}'
         )
+
+
+class IssueOperation(models.Model):
+    """Неизменяемая запись фактической частичной выдачи по позиции заявки."""
+
+    request_item = models.ForeignKey(
+        AssetRequestItem,
+        on_delete=models.PROTECT,
+        related_name='issue_operations',
+        verbose_name=_('Позиция заявки'),
+    )
+    asset = models.ForeignKey(
+        'references.Asset',
+        on_delete=models.PROTECT,
+        related_name='request_issue_operations',
+        verbose_name=_('Выданный актив'),
+    )
+    warehouse = models.ForeignKey(
+        'references.Warehouse',
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name='request_issue_operations',
+        verbose_name=_('Склад'),
+    )
+    movement = models.OneToOneField(
+        'assets.StockMovement',
+        on_delete=models.PROTECT,
+        related_name='request_issue_operation',
+        verbose_name=_('Движение по складу'),
+    )
+    quantity = models.DecimalField(
+        _('Количество'), max_digits=12, decimal_places=2,
+    )
+    performed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name='request_issue_operations',
+        verbose_name=_('Выдал'),
+    )
+    created_at = models.DateTimeField(_('Дата выдачи'), auto_now_add=True)
+
+    class Meta:
+        verbose_name = _('Операция выдачи по заявке')
+        verbose_name_plural = _('Операции выдачи по заявкам')
+        ordering = ['created_at', 'id']
+        constraints = [
+            models.CheckConstraint(
+                check=models.Q(quantity__gt=0),
+                name='request_issue_quantity_positive',
+            ),
+        ]
 
 
 class ApprovalStep(models.Model):

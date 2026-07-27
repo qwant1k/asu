@@ -8,6 +8,8 @@ import type { AssetRequest, PaginatedResponse, RequestTypeReference } from '../.
 import {
   C, PageHeader, Btn, Th, Td, Badge, Spinner, EmptyState, hoverRow, Surface, FilterBar, Popconfirm,
 } from '../../shared/ui/primitives';
+import { AnimatePresence } from '../../shared/ui/animated/animations';
+import AnimatedRow from '../../shared/ui/animated/AnimatedRow';
 
 const PAGE_SIZE = 20;
 
@@ -123,14 +125,20 @@ const RequestsPage: React.FC = () => {
   const handleConfirmAction = async () => {
     if (!confirmAction) return;
     setActionError(null);
+    const { request, mode } = confirmAction;
     try {
-      if (confirmAction.mode === 'delete') {
-        await api.delete(`/requests/${confirmAction.request.id}/`);
+      if (mode === 'delete') {
+        await api.delete(`/requests/${request.id}/`);
       } else {
-        await api.post(`/requests/${confirmAction.request.id}/mark-for-deletion/`);
+        await api.post(`/requests/${request.id}/mark-for-deletion/`);
       }
       setConfirmAction(null);
-      fetchData();
+      if (mode === 'delete') {
+        setData((prev) => prev.filter((r) => r.id !== request.id));
+        setTotal((prev) => Math.max(0, prev - 1));
+      } else {
+        fetchData();
+      }
       fetchPendingCount();
       fetchIssueCount();
       fetchDeletionCount();
@@ -172,7 +180,7 @@ const RequestsPage: React.FC = () => {
         right={<Btn onClick={() => navigate('/requests/new')}>+ {t('requests.createNew')}</Btn>}
       />
 
-      <FilterBar style={{ gap: 8, marginBottom: 14 }}>
+      <FilterBar style={{ gap: 8, marginBottom: 10 }}>
         <button onClick={() => { setPendingOnly(false); setIssueOnly(false); setDeletionOnly(false); setPage(1); }} style={{
           padding: '8px 16px', borderRadius: C.radiusSm, border: `1px solid ${allMode ? C.accent : C.inputBorder}`,
           background: allMode ? `linear-gradient(135deg, ${C.accent}, #0EA5E9)` : C.glassStrong, color: allMode ? '#fff' : C.text,
@@ -274,11 +282,12 @@ const RequestsPage: React.FC = () => {
                 </tr>
               </thead>
               <tbody>
+                <AnimatePresence>
                 {data.map((r) => {
                   const needsInitiatorAction = user?.id === r.initiator && ['DRAFT', 'SENT_FOR_REVISION'].includes(r.status);
                   const canMarkDeletion = !isAdmin && user?.id === r.initiator && !r.deletion_requested;
                   return (
-                    <tr key={r.id} onMouseEnter={(e) => hoverRow(e, true)} onMouseLeave={(e) => hoverRow(e, false)}>
+                    <AnimatedRow key={r.id} onMouseEnter={(e) => hoverRow(e, true)} onMouseLeave={(e) => hoverRow(e, false)}>
                       <Td bold>{r.number}</Td>
                       <Td><Badge status={r.request_type_name} /></Td>
                       <Td><Badge status={r.status_display} /></Td>
@@ -334,9 +343,10 @@ const RequestsPage: React.FC = () => {
                           )}
                         </div>
                       </Td>
-                    </tr>
+                    </AnimatedRow>
                   );
                 })}
+                </AnimatePresence>
               </tbody>
             </table>
           </div>

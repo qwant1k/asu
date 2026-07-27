@@ -14,12 +14,12 @@ import {
 import { useAppSelector } from '../../app/hooks';
 import api from '../../api/axios';
 import AssetLink from '../../shared/components/AssetLink';
-import type { Asset, AssetRequest, PaginatedResponse, User } from '../../shared/types';
+import type { Asset, AssetRequest, PaginatedResponse, User, WarehouseStock } from '../../shared/types';
 import {
   C, PageHeader, Btn, Panel, Badge, Th, Td, Spinner, EmptyState, Popconfirm, Modal, hoverRow,
 } from '../../shared/ui/primitives';
 
-interface IssueDraftRow { id: number; issued_asset: number | null; quantity_issued: number; }
+interface IssueDraftRow { id: number; issued_asset: number | null; quantity_issued: number; warehouse: number | null; }
 type ApprovalAction = 'approve' | 'reject' | 'revision';
 type SimpleAction = 'withdraw' | 'cancel' | 'delete';
 
@@ -68,6 +68,7 @@ const RequestDetailPage: React.FC = () => {
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionComment, setActionComment] = useState('');
   const [groupedAssets, setGroupedAssets] = useState<Asset[]>([]);
+  const [warehouseStocks, setWarehouseStocks] = useState<WarehouseStock[]>([]);
   const [issueRows, setIssueRows] = useState<Record<number, IssueDraftRow>>({});
   const [issueResponsibleCandidates, setIssueResponsibleCandidates] = useState<User[]>([]);
   const [selectedIssueResponsibles, setSelectedIssueResponsibles] = useState<number[]>([]);
@@ -84,7 +85,12 @@ const RequestDetailPage: React.FC = () => {
       setRequest(res.data);
       const nextRows: Record<number, IssueDraftRow> = {};
       (res.data.items || []).forEach((item) => {
-        nextRows[item.id] = { id: item.id, issued_asset: item.issued_asset, quantity_issued: Number(item.quantity_issued || item.quantity_requested || 1) };
+        nextRows[item.id] = {
+          id: item.id,
+          issued_asset: item.issued_asset,
+          quantity_issued: Math.max(0, Number(item.quantity_requested) - Number(item.quantity_issued || 0)),
+          warehouse: null,
+        };
       });
       setIssueRows(nextRows);
     } catch { /* */ } finally { setLoading(false); }
@@ -97,11 +103,19 @@ const RequestDetailPage: React.FC = () => {
         params: { page_size: 1000, grouped: true, asset_type: baseAssetType },
       });
       setGroupedAssets(res.data.results || []);
+      const stockRes = await api.get<PaginatedResponse<WarehouseStock>>('/assets/warehouse-stock/', {
+        params: { page_size: 1000, quantity_min: 0.01 },
+      });
+      setWarehouseStocks(stockRes.data.results || []);
     } catch { setGroupedAssets([]); }
   }, []);
 
   useEffect(() => { fetchRequest(); }, [fetchRequest]);
-  useEffect(() => { if (request?.status === 'APPROVED') fetchGroupedAssets(request.request_type_asset_type); }, [fetchGroupedAssets, request]);
+  useEffect(() => {
+    if (request && ['APPROVED', 'PARTIALLY_ISSUED'].includes(request.status)) {
+      fetchGroupedAssets(request.request_type_asset_type);
+    }
+  }, [fetchGroupedAssets, request]);
   useEffect(() => {
     if (!request?.pending_my_approval || !isAhsIssueApprovalStep) {
       setIssueResponsibleCandidates([]);
@@ -204,12 +218,32 @@ const RequestDetailPage: React.FC = () => {
     setActionLoading(true);
     try {
       await api.post(`/requests/${id}/issue-items/`, {
-        items: request.items.map((item) => ({ id: item.id, issued_asset: issueRows[item.id]?.issued_asset, quantity_issued: issueRows[item.id]?.quantity_issued })),
+        items: request.items
+          .filter((item) => Number(item.quantity_issued || 0) < Number(item.quantity_requested))
+          .map((item) => ({
+            id: item.id,
+            issued_asset: issueRows[item.id]?.issued_asset,
+            quantity_issued: issueRows[item.id]?.quantity_issued,
+            warehouse: issueRows[item.id]?.warehouse,
+          })),
       });
       fetchRequest();
     } catch (err: any) {
       setActionError(err?.response?.data?.detail || t('common.error'));
     } finally { setActionLoading(false); }
+  };
+
+  const handleConfirmReceipt = async () => {
+    setActionError(null);
+    setActionLoading(true);
+    try {
+      await api.post(`/requests/${id}/confirm-receipt/`);
+      await fetchRequest();
+    } catch (err: any) {
+      setActionError(err?.response?.data?.detail || t('common.error'));
+    } finally {
+      setActionLoading(false);
+    }
   };
 
   if (loading) return <Spinner />;
@@ -222,8 +256,9 @@ const RequestDetailPage: React.FC = () => {
   const canEdit = isInitiator && (isDraft || isRevision);
   const canWithdraw = isInitiator && request.status === 'PENDING_SUPERVISOR';
   const canCancel = (isInitiator && isDraft) || (isAdmin && !['EXECUTED', 'CANCELLED'].includes(request.status));
-  const canDelete = isAdmin;
+  const canDelete = isDraft && (isInitiator || isAdmin);
   const canApprove = request.pending_my_approval;
+  const canConfirmReceipt = isInitiator && request.status === 'EXECUTED' && !request.receipt_confirmed_at;
   const workflowSteps = [
     { label: 'Создана', done: true, active: isDraft || isRevision },
     {
@@ -268,18 +303,33 @@ const RequestDetailPage: React.FC = () => {
 
       <Panel title="Процесс заявки" style={{ marginBottom: 16 }}>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: 10 }}>
-          {workflowSteps.map((step, idx) => (
-            <div key={step.label} style={{
-              border: `1px solid ${step.active ? C.accent : step.done ? C.successBg : C.border}`,
-              background: step.active ? C.accentLight : step.done ? C.successBg : C.surfaceSoft,
-              borderRadius: C.radiusSm,
-              padding: '12px 14px',
-              minHeight: 62,
-            }}>
-              <div style={{ fontSize: 11, color: C.secondary, marginBottom: 4 }}>Этап {idx + 1}</div>
-              <div style={{ fontSize: 13, fontWeight: 700, color: step.active ? C.accent : step.done ? C.success : C.text }}>{step.label}</div>
-            </div>
-          ))}
+          {workflowSteps.map((step, idx) => {
+            const matchingApproval = (request.approvals || []).find(
+              (a) => {
+                if (idx === 1 && a.action === 'SUBMITTED') return true;
+                if (idx === 2 && a.action === 'APPROVED') return true;
+                return false;
+              }
+            );
+            return (
+              <div key={step.label} style={{
+                border: `1px solid ${step.active ? C.accent : step.done ? C.successBg : C.border}`,
+                background: step.active ? C.accentLight : step.done ? C.successBg : C.surfaceSoft,
+                borderRadius: C.radiusSm,
+                padding: '12px 14px',
+                minHeight: 62,
+              }}>
+                <div style={{ fontSize: 11, color: C.secondary, marginBottom: 4 }}>Этап {idx + 1}</div>
+                <div style={{ fontSize: 13, fontWeight: 700, color: step.active ? C.accent : step.done ? C.success : C.text }}>{step.label}</div>
+                {matchingApproval && (
+                  <div style={{ fontSize: 11, color: C.muted, marginTop: 4 }}>
+                    {matchingApproval.approver_name}
+                    {matchingApproval.signed_at && ` · ${formatDateTime(matchingApproval.signed_at)}`}
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
       </Panel>
 
@@ -331,12 +381,17 @@ const RequestDetailPage: React.FC = () => {
             Заявка хранит группы. Выдача выполняется по конкретной карточке и точному количеству.
           </div>
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead><tr><Th>Группа заявки</Th><Th>Точный справочник</Th><Th>Кол-во к выдаче</Th></tr></thead>
+            <thead><tr><Th>Группа заявки</Th><Th>Точный справочник</Th><Th>Склад</Th><Th>Кол-во к выдаче</Th></tr></thead>
             <tbody>
-              {(request.items || []).map((item) => {
+              {(request.items || []).filter(
+                (item) => Number(item.quantity_issued || 0) < Number(item.quantity_requested),
+              ).map((item) => {
                 const options = ((item.requested_group && groupedAssetsMap[item.requested_group]) || []);
                 const selAsset = groupedAssets.find((a) => a.id === issueRows[item.id]?.issued_asset);
                 const isSingle = selAsset?.asset_type === 'OS' || selAsset?.asset_type === 'NMA';
+                const stockOptions = warehouseStocks.filter(
+                  (stock) => stock.asset === issueRows[item.id]?.issued_asset && Number(stock.quantity) > 0,
+                );
                 return (
                   <tr key={item.id} onMouseEnter={(e) => hoverRow(e, true)} onMouseLeave={(e) => hoverRow(e, false)}>
                     <Td>
@@ -347,6 +402,20 @@ const RequestDetailPage: React.FC = () => {
                       <select value={issueRows[item.id]?.issued_asset ?? ''} onChange={(e) => handleIssueRowChange(item.id, 'issued_asset', e.target.value ? Number(e.target.value) : null)} style={inputStyle}>
                         <option value="">Выберите карточку</option>
                         {options.map((a) => <option key={a.id} value={a.id}>{a.name} · {a.code}{a.inventory_number ? ` · ${a.inventory_number}` : ''}</option>)}
+                      </select>
+                    </Td>
+                    <Td>
+                      <select
+                        value={issueRows[item.id]?.warehouse ?? ''}
+                        onChange={(e) => handleIssueRowChange(item.id, 'warehouse', e.target.value ? Number(e.target.value) : null)}
+                        style={inputStyle}
+                      >
+                        <option value="">Автовыбор при единственном складе</option>
+                        {stockOptions.map((stock) => (
+                          <option key={stock.id} value={stock.warehouse ?? ''}>
+                            {stock.warehouse_name || stock.location || 'Без склада'} · остаток {stock.quantity}
+                          </option>
+                        ))}
                       </select>
                     </Td>
                     <Td>
@@ -394,7 +463,19 @@ const RequestDetailPage: React.FC = () => {
         </Panel>
       )}
 
-      <div style={{ display: 'flex', gap: 10, marginTop: 8, flexWrap: 'wrap' }}>
+      <div style={{
+        position: 'sticky',
+        bottom: 0,
+        display: 'flex',
+        gap: 10,
+        marginTop: 8,
+        flexWrap: 'wrap',
+        padding: '12px 16px',
+        background: C.glassStrong,
+        borderTop: `1px solid ${C.border}`,
+        borderRadius: C.radiusSm,
+        zIndex: 10,
+      }}>
         {canEdit && <Btn variant="secondary" onClick={() => navigate(`/requests/${request.id}/edit`)}><EditOutlined /> {t('common.edit')}</Btn>}
         {canSubmit && <Btn onClick={handleSubmit} loading={actionLoading}><SendOutlined /> {isRevision ? 'Повторно отправить' : t('requests.submit')}</Btn>}
         {canWithdraw && <Btn variant="secondary" onClick={() => setSimpleAction('withdraw')}><RollbackOutlined /> Отозвать</Btn>}
@@ -408,6 +489,11 @@ const RequestDetailPage: React.FC = () => {
               <CloseOutlined /> {t('requests.reject')}
             </Btn>
           </>
+        )}
+        {canConfirmReceipt && (
+          <Btn onClick={handleConfirmReceipt} loading={actionLoading}>
+            <CheckOutlined /> Подтвердить получение
+          </Btn>
         )}
       </div>
 

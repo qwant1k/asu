@@ -1,4 +1,4 @@
-"""Сервис workflow документов ИС «АСУ»."""
+﻿"""Сервис workflow документов ИС «АСУ»."""
 
 from django.db import transaction
 from django.contrib.contenttypes.models import ContentType
@@ -9,6 +9,7 @@ from apps.common.constants import (
     DOCUMENT_DRAFT,
     DOCUMENT_PENDING_AHS_APPROVAL,
     DOCUMENT_PENDING_CHANGE_APPROVAL,
+    DOCUMENT_PENDING_SIGNATURE,
     DOCUMENT_PARTIALLY_SIGNED,
     DOCUMENT_REJECTED,
     DOCUMENT_SIGNED,
@@ -33,6 +34,11 @@ class DocumentWorkflowService:
         return DocumentSignature.objects.filter(
             document_type=ct, document_id=document.pk,
         )
+
+    @staticmethod
+    def _lock(document):
+        """Защитить смену статуса и проведение от параллельных запросов."""
+        return type(document).objects.select_for_update().get(pk=document.pk)
 
     @staticmethod
     def get_document_title(document):
@@ -66,8 +72,11 @@ class DocumentWorkflowService:
     @transaction.atomic
     def submit_for_ahs_approval(document, user):
         """Отправить документ руководителю АХС на согласование."""
+        document = DocumentWorkflowService._lock(document)
         if document.status not in (DOCUMENT_DRAFT, DOCUMENT_SENT_FOR_REVISION):
             raise ValueError(_('Документ можно отправить только из черновика или доработки'))
+        if document.created_by_id != user.id and not has_access(user, 'system.admin'):
+            raise ValueError(_('Отправить документ может только его автор или администратор'))
 
         document.status = DOCUMENT_PENDING_AHS_APPROVAL
         document.save(update_fields=['status', 'updated_at'])
@@ -97,10 +106,18 @@ class DocumentWorkflowService:
     @transaction.atomic
     def request_change(document, user, reason=''):
         """Запросить разрешение на изменение уже подписанного документа."""
-        from apps.documents.models import IncomingInvoice
+        document = DocumentWorkflowService._lock(document)
+        from apps.documents.models import (
+            IncomingInvoice, WriteOffAct, InternalTransferInvoice,
+            CommissionProtocol, Petition,
+        )
 
-        if not isinstance(document, IncomingInvoice):
-            raise ValueError(_('Запрос на изменение сейчас доступен для приходных накладных'))
+        allowed_types = (
+            IncomingInvoice, WriteOffAct, InternalTransferInvoice,
+            CommissionProtocol, Petition,
+        )
+        if not isinstance(document, allowed_types):
+            raise ValueError(_('Запрос на изменение недоступен для этого типа документа'))
         if document.status != DOCUMENT_SIGNED:
             raise ValueError(_('Запросить изменение можно только по подписанному документу'))
 
@@ -141,6 +158,7 @@ class DocumentWorkflowService:
     @transaction.atomic
     def approve_change_request(document, approver, comment=''):
         """Разрешить изменение подписанного документа."""
+        document = DocumentWorkflowService._lock(document)
         if document.status != DOCUMENT_PENDING_CHANGE_APPROVAL:
             raise ValueError(_('Документ не ожидает решения по изменению'))
         if not DocumentWorkflowService.can_approve_ahs(approver):
@@ -173,6 +191,7 @@ class DocumentWorkflowService:
     @transaction.atomic
     def reject_change_request(document, approver, reason=''):
         """Отклонить запрос на изменение подписанного документа."""
+        document = DocumentWorkflowService._lock(document)
         if document.status != DOCUMENT_PENDING_CHANGE_APPROVAL:
             raise ValueError(_('Документ не ожидает решения по изменению'))
         if not DocumentWorkflowService.can_approve_ahs(approver):
@@ -204,10 +223,13 @@ class DocumentWorkflowService:
     @transaction.atomic
     def approve_ahs(document, approver, comment=''):
         """Согласовать документ руководителем АХС и финализировать документ."""
+        document = DocumentWorkflowService._lock(document)
         if document.status != DOCUMENT_PENDING_AHS_APPROVAL:
             raise ValueError(_('Документ не ожидает согласования АХС'))
         if not DocumentWorkflowService.can_approve_ahs(approver):
             raise ValueError(_('Недостаточно прав для согласования документа'))
+        if document.created_by_id == approver.id and not has_access(approver, 'system.admin'):
+            raise ValueError(_('Автор документа не может согласовать собственный документ'))
 
         ct = ContentType.objects.get_for_model(document)
         signature, created = DocumentSignature.objects.get_or_create(
@@ -233,6 +255,7 @@ class DocumentWorkflowService:
     @transaction.atomic
     def reject_ahs(document, approver, reason=''):
         """Отклонить документ руководителем АХС."""
+        document = DocumentWorkflowService._lock(document)
         if document.status != DOCUMENT_PENDING_AHS_APPROVAL:
             raise ValueError(_('Документ не ожидает согласования АХС'))
         if not DocumentWorkflowService.can_approve_ahs(approver):
@@ -259,8 +282,9 @@ class DocumentWorkflowService:
     @transaction.atomic
     def sign(document, signer, role_label='', is_acting_chairman=False):
         """Подписать документ текущим пользователем."""
-        if document.status == DOCUMENT_SIGNED:
-            raise ValueError(_('Документ уже подписан'))
+        document = DocumentWorkflowService._lock(document)
+        if document.status not in (DOCUMENT_PENDING_SIGNATURE, DOCUMENT_PARTIALLY_SIGNED):
+            raise ValueError(_('Документ не находится на этапе подписания'))
 
         ct = ContentType.objects.get_for_model(document)
         signature = DocumentSignature.objects.filter(
@@ -271,14 +295,10 @@ class DocumentWorkflowService:
         ).order_by('-id').first()
 
         if not signature:
-            signature = DocumentSignature.objects.create(
-                document_type=ct,
-                document_id=document.pk,
-                signer=signer,
-                role_label=role_label,
-                is_acting_chairman=is_acting_chairman,
-            )
-        elif role_label or is_acting_chairman:
+            raise ValueError(_('Пользователь не назначен подписантом этого документа'))
+        if document.created_by_id == signer.id and not has_access(signer, 'system.admin'):
+            raise ValueError(_('Автор документа не может подписать собственный документ'))
+        if role_label or is_acting_chairman:
             signature.role_label = role_label or signature.role_label
             signature.is_acting_chairman = is_acting_chairman
             signature.save(update_fields=['role_label', 'is_acting_chairman'])
@@ -295,6 +315,11 @@ class DocumentWorkflowService:
     @transaction.atomic
     def send_for_revision(document, signer, reason=''):
         """Отправить документ на доработку."""
+        document = DocumentWorkflowService._lock(document)
+        if document.status not in (DOCUMENT_PENDING_SIGNATURE, DOCUMENT_PARTIALLY_SIGNED):
+            raise ValueError(_('Документ не находится на этапе подписания'))
+        if not reason:
+            raise ValueError(_('Укажите причину возврата на доработку'))
         ct = ContentType.objects.get_for_model(document)
         signature = DocumentSignature.objects.filter(
             document_type=ct,
@@ -303,10 +328,11 @@ class DocumentWorkflowService:
             signed_at__isnull=True,
         ).order_by('-id').first()
 
-        if signature:
-            signature.sent_for_revision_at = timezone.now()
-            signature.revision_reason = reason
-            signature.save(update_fields=['sent_for_revision_at', 'revision_reason'])
+        if not signature:
+            raise ValueError(_('Пользователь не назначен подписантом этого документа'))
+        signature.sent_for_revision_at = timezone.now()
+        signature.revision_reason = reason
+        signature.save(update_fields=['sent_for_revision_at', 'revision_reason'])
 
         document.status = DOCUMENT_SENT_FOR_REVISION
         document.save(update_fields=['status', 'updated_at'])
@@ -351,7 +377,10 @@ class DocumentWorkflowService:
                 movement_type=MOVEMENT_RECEIPT,
             )
             for movement in previous_movements:
-                stock = WarehouseStock.objects.select_for_update().filter(asset=movement.asset).first()
+                stock = WarehouseStock.objects.select_for_update().filter(
+                    asset=movement.asset,
+                    warehouse=movement.warehouse,
+                ).first()
                 if not stock:
                     continue
                 if stock.quantity < movement.quantity:
@@ -361,7 +390,7 @@ class DocumentWorkflowService:
                         }
                     )
                 stock.quantity -= movement.quantity
-                stock.total_amount = stock.quantity * stock.asset.unit_price
+                stock.total_amount = stock.quantity * stock.unit_price
                 stock.save(update_fields=['quantity', 'total_amount', 'updated_at'])
             previous_movements.delete()
 
@@ -382,6 +411,7 @@ class DocumentWorkflowService:
                     quantity=item.quantity,
                     document=document,
                     performed_by=document.created_by,
+                    warehouse=getattr(document, 'warehouse', None),
                 )
 
             # Уведомление 1С (заглушка) для ОС/НМА

@@ -112,6 +112,7 @@ def apply_asset_filters(qs, request, date_field=None):
     group = request.query_params.get('group')
     date_from = request.query_params.get('date_from')
     date_to = request.query_params.get('date_to')
+    mol_id = request.query_params.get('mol_id') or request.query_params.get('user_id')
 
     if search:
         qs = qs.filter(
@@ -125,6 +126,11 @@ def apply_asset_filters(qs, request, date_field=None):
         qs = qs.filter(asset__category_id=category)
     if group:
         qs = qs.filter(asset__group_id=group)
+    field_names = {field.name for field in qs.model._meta.get_fields()}
+    if mol_id and 'user' in field_names:
+        qs = qs.filter(user_id=mol_id)
+    elif mol_id and {'from_user', 'to_user'}.issubset(field_names):
+        qs = qs.filter(Q(from_user_id=mol_id) | Q(to_user_id=mol_id))
     if date_field and date_from:
         qs = qs.filter(**{f'{date_field}__date__gte' if date_field.endswith('_at') else f'{date_field}__gte': date_from})
     if date_field and date_to:
@@ -302,6 +308,7 @@ class InventoryReportView(APIView):
     def get(self, request):
         asset_type = request.query_params.get('asset_type')
         department_id = request.query_params.get('department_id')
+        mol_id = request.query_params.get('mol_id') or request.query_params.get('user_id')
 
         qs = AssetAssignment.objects.select_related(
             'asset', 'asset__category', 'asset__group', 'user', 'user__department', 'assigned_by',
@@ -312,6 +319,8 @@ class InventoryReportView(APIView):
             qs = qs.filter(asset__asset_type=asset_type)
         if department_id:
             qs = qs.filter(user__department_id=department_id)
+        if mol_id:
+            qs = qs.filter(user_id=mol_id)
 
         serializer = AssetAssignmentSerializer(qs, many=True)
         return report_response(

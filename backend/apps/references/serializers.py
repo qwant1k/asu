@@ -209,14 +209,11 @@ class AssetSerializer(serializers.ModelSerializer):
         }
 
     def _stock(self, obj):
-        try:
-            return obj.warehouse_stock
-        except ObjectDoesNotExist:
-            return None
+        stocks = list(obj.warehouse_stocks.all())
+        return stocks[0] if len(stocks) == 1 else None
 
     def get_stock_total_amount(self, obj):
-        stock = self._stock(obj)
-        return str(stock.total_amount) if stock else '0.00'
+        return str(sum((stock.total_amount for stock in obj.warehouse_stocks.all()), 0))
 
     def get_stock_balance_date(self, obj):
         stock = self._stock(obj)

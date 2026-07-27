@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+﻿import React, { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
@@ -25,6 +25,7 @@ import {
   C, Btn, Badge, InputField, SelectField, StatCard, Spinner, EmptyState, Modal, Tabs,
 } from '../../shared/ui/primitives';
 import './profile.css';
+import { usePageBreadcrumbs } from '../../shared/navigation/breadcrumbs';
 
 type ProfileTab = 'work' | 'history' | 'notifications';
 
@@ -156,6 +157,19 @@ const ProfilePage: React.FC = () => {
 
   const unreadCount = notifications.filter((n) => !n.is_read).length;
   const currentPhoto = removePhoto ? null : photoPreview || profileUser?.photo || null;
+  const profileBreadcrumbs = useMemo(() => {
+    if (!profileUser) return null;
+    const displayName = profileUser.full_name || profileUser.username;
+    if (isOwnProfile) {
+      return [{ label: 'Профиль', path: '/profile' }];
+    }
+    return [
+      { label: 'Администрирование', path: '/admin/users' },
+      { label: 'Пользователи', path: '/admin/users' },
+      { label: displayName, path: `/profile/${profileUser.id}` },
+    ];
+  }, [isOwnProfile, profileUser]);
+  usePageBreadcrumbs(profileBreadcrumbs);
 
   const handlePhotoInput = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -317,62 +331,68 @@ const ProfilePage: React.FC = () => {
       </div>
 
       <div className="profile-grid profile-grid--tabs">
-        <div className="profile-main-column" style={{ display: activeTab === 'history' ? undefined : 'none' }}>
-          <section className="profile-panel">
-            <div className="profile-panel__head">
-              <div>
-                <h2>История заявок</h2>
-                <p>Последние заявки, созданные сотрудником</p>
+        {activeTab === 'history' && (
+          <div className="profile-main-column">
+            <section className="profile-panel">
+              <div className="profile-panel__head">
+                <div>
+                  <h2>История заявок</h2>
+                  <p>Последние заявки, созданные сотрудником</p>
+                </div>
+                <Badge status={`${requests.length} записей`} />
               </div>
-              <Badge status={`${requests.length} записей`} />
-            </div>
 
-            {requests.length === 0 ? <EmptyState text="Заявки не найдены" /> : (
-              <div className="profile-request-list">
-                {requests.map((request) => (
-                  <button
-                    key={request.id}
-                    type="button"
-                    className="profile-request-item"
-                    onClick={() => navigate(`/requests/${request.id}`)}
-                  >
-                    <div className="profile-request-item__icon"><FileTextOutlined /></div>
-                    <div className="profile-request-item__body">
-                      <div className="profile-request-item__title">
-                        <strong>{request.number}</strong>
-                        <Badge status={request.status_display} />
+              {requests.length === 0 ? <EmptyState text="Заявки не найдены" /> : (
+                <div className="profile-request-list">
+                  {requests.map((request) => (
+                    <button
+                      key={request.id}
+                      type="button"
+                      className="profile-request-item"
+                      onClick={() => navigate(`/requests/${request.id}`)}
+                    >
+                      <div className="profile-request-item__icon"><FileTextOutlined /></div>
+                      <div className="profile-request-item__body">
+                        <div className="profile-request-item__title">
+                          <strong>{request.number}</strong>
+                          <Badge status={request.status_display} />
+                        </div>
+                        <span>{request.request_type_name} · {fmt(request.created_at)}</span>
                       </div>
-                      <span>{request.request_type_name} · {fmt(request.created_at)}</span>
-                    </div>
-                  </button>
-                ))}
-              </div>
-            )}
-          </section>
-        </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </section>
+          </div>
+        )}
 
-        <aside className="profile-side-column" style={{ display: activeTab === 'work' || activeTab === 'notifications' ? undefined : 'none' }}>
-          <section className="profile-panel" style={{ display: activeTab === 'work' ? undefined : 'none' }}>
-            <div className="profile-panel__head">
-              <div>
-                <h2>Рабочая информация</h2>
-                <p>Роль, подразделение и активность</p>
+        {activeTab === 'work' && (
+          <aside className="profile-side-column">
+            <section className="profile-panel">
+              <div className="profile-panel__head">
+                <div>
+                  <h2>Рабочая информация</h2>
+                  <p>Роль, подразделение и активность</p>
+                </div>
               </div>
-            </div>
-            <div className="profile-info-list">
-              <InfoItem label="Логин" value={profileUser.username} icon={<IdcardOutlined />} />
-              <InfoItem label="Роль" value={roleLabel} icon={<CheckCircleOutlined />} />
-              <InfoItem label="Подразделение" value={profileUser.department_name || 'Не указано'} icon={<TeamOutlined />} />
-              <InfoItem label="Руководитель" value={profileUser.supervisor_name || 'Не указан'} icon={<UserOutlined />} />
-              <InfoItem label="Email" value={profileUser.email || 'Не указан'} icon={<MailOutlined />} />
-              <InfoItem label="Телефон" value={profileUser.phone || 'Не указан'} icon={<PhoneOutlined />} />
-              <InfoItem label="Дата регистрации" value={fmt(profileUser.date_joined)} icon={<CheckCircleOutlined />} />
-              <InfoItem label="Последний вход" value={fmt(profileUser.last_login)} icon={<CheckCircleOutlined />} />
-            </div>
-          </section>
+              <div className="profile-info-list">
+                <InfoItem label="Логин" value={profileUser.username} icon={<IdcardOutlined />} />
+                <InfoItem label="Роль" value={roleLabel} icon={<CheckCircleOutlined />} />
+                <InfoItem label="Подразделение" value={profileUser.department_name || 'Не указано'} icon={<TeamOutlined />} />
+                <InfoItem label="Руководитель" value={profileUser.supervisor_name || 'Не указан'} icon={<UserOutlined />} />
+                <InfoItem label="Email" value={profileUser.email || 'Не указан'} icon={<MailOutlined />} />
+                <InfoItem label="Телефон" value={profileUser.phone || 'Не указан'} icon={<PhoneOutlined />} />
+                <InfoItem label="Дата регистрации" value={fmt(profileUser.date_joined)} icon={<CheckCircleOutlined />} />
+                <InfoItem label="Последний вход" value={fmt(profileUser.last_login)} icon={<CheckCircleOutlined />} />
+              </div>
+            </section>
+          </aside>
+        )}
 
-          {isOwnProfile && (
-            <section className="profile-panel" style={{ display: activeTab === 'notifications' ? undefined : 'none' }}>
+        {activeTab === 'notifications' && isOwnProfile && (
+          <aside className="profile-side-column">
+            <section className="profile-panel">
               <div className="profile-panel__head profile-panel__head--compact">
                 <div>
                   <h2>{t('notifications.title')}</h2>
@@ -403,10 +423,12 @@ const ProfilePage: React.FC = () => {
                 </div>
               )}
             </section>
-          )}
+          </aside>
+        )}
 
-          {!isOwnProfile && (
-            <section className="profile-panel" style={{ display: activeTab === 'notifications' ? undefined : 'none' }}>
+        {activeTab === 'notifications' && !isOwnProfile && (
+          <aside className="profile-side-column">
+            <section className="profile-panel">
               <div className="profile-panel__head profile-panel__head--compact">
                 <div>
                   <h2>{t('notifications.title')}</h2>
@@ -415,8 +437,8 @@ const ProfilePage: React.FC = () => {
               </div>
               <EmptyState text="Уведомления доступны только в собственном личном кабинете" />
             </section>
-          )}
-        </aside>
+          </aside>
+        )}
       </div>
 
       <Modal
