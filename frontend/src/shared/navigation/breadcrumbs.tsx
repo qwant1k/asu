@@ -76,51 +76,57 @@ const exactRoutes: Record<string, AppBreadcrumbItem[]> = {
     { label: 'Справочники', path: '/references' },
     { label: 'Должности', path: '/references/positions' },
   ],
+  '/warehouse': [{ label: 'Склад', path: '/warehouse' }],
   '/warehouse/stock': [
-    { label: 'Склад', path: '/warehouse/stock' },
+    { label: 'Склад', path: '/warehouse' },
     { label: 'Остатки', path: '/warehouse/stock' },
   ],
   '/warehouse/stock/upload': [
-    { label: 'Администрирование', path: '/admin/users' },
+    { label: 'Администрирование', path: '/admin' },
     { label: 'Загрузка остатков из Excel', path: '/admin/stock-upload' },
   ],
   '/warehouse/stock-alerts': [
-    { label: 'Склад', path: '/warehouse/stock' },
+    { label: 'Склад', path: '/warehouse' },
     { label: 'Алармы остатков', path: '/warehouse/stock-alerts' },
   ],
   '/warehouse/movements': [
-    { label: 'Склад', path: '/warehouse/stock' },
+    { label: 'Склад', path: '/warehouse' },
     { label: 'Движения', path: '/warehouse/movements' },
   ],
   '/warehouse/assignments': [
-    { label: 'Склад', path: '/warehouse/stock' },
+    { label: 'Склад', path: '/warehouse' },
     { label: 'Закрепления', path: '/warehouse/assignments' },
   ],
   '/requests': [{ label: 'Заявки', path: '/requests' }],
+  '/requests/journal': [
+    { label: 'Заявки', path: '/requests' },
+    { label: 'Журнал заявок', path: '/requests/journal' },
+  ],
   '/requests/new': [
     { label: 'Заявки', path: '/requests' },
     { label: 'Новая заявка', path: '/requests/new' },
   ],
   '/documents': [{ label: 'Документы', path: '/documents' }],
   '/inventory': [{ label: 'Инвентаризация', path: '/inventory' }],
+  '/admin': [{ label: 'Администрирование', path: '/admin' }],
   '/admin/users': [
-    { label: 'Администрирование', path: '/admin/users' },
+    { label: 'Администрирование', path: '/admin' },
     { label: 'Пользователи', path: '/admin/users' },
   ],
   '/admin/access': [
-    { label: 'Администрирование', path: '/admin/users' },
+    { label: 'Администрирование', path: '/admin' },
     { label: 'Права доступа', path: '/admin/access' },
   ],
   '/admin/sync-1c': [
-    { label: 'Администрирование', path: '/admin/users' },
+    { label: 'Администрирование', path: '/admin' },
     { label: 'Синхронизация с 1С', path: '/admin/sync-1c' },
   ],
   '/admin/stock-upload': [
-    { label: 'Администрирование', path: '/admin/users' },
+    { label: 'Администрирование', path: '/admin' },
     { label: 'Загрузка остатков из Excel', path: '/admin/stock-upload' },
   ],
   '/admin/trash': [
-    { label: 'Администрирование', path: '/admin/users' },
+    { label: 'Администрирование', path: '/admin' },
     { label: 'Удалённые объекты', path: '/admin/trash' },
   ],
 };

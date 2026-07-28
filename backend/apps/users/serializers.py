@@ -158,13 +158,15 @@ class UserProfileSerializer(serializers.ModelSerializer):
             'supervisor',
             'supervisor_name',
             'is_active',
+            'is_staff',
+            'is_superuser',
             'full_name',
             'short_name',
             'date_joined',
             'last_login',
             'effective_permissions',
         ]
-        read_only_fields = ['id', 'username', 'role', 'date_joined', 'last_login', 'supervisor']
+        read_only_fields = ['id', 'username', 'role', 'date_joined', 'last_login', 'supervisor', 'is_staff', 'is_superuser']
 
     def get_effective_permissions(self, obj):
         return sorted(effective_access_codes(obj))

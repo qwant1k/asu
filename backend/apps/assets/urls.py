@@ -5,6 +5,7 @@ from rest_framework.routers import DefaultRouter
 
 from .views import (
     ActiveStockAlertView,
+    StockUploadConfirmView,
     StockUploadView,
     WarehouseStockViewSet,
     AssetAssignmentViewSet,
@@ -22,5 +23,7 @@ router.register('stock-alert-rules', StockAlertRuleViewSet, basename='stock-aler
 
 urlpatterns = [
     path('upload-stock/', StockUploadView.as_view(), name='upload-stock'),
+    path('upload-stock/preview/', StockUploadView.as_view(), name='upload-stock-preview'),
+    path('upload-stock/confirm/', StockUploadConfirmView.as_view(), name='upload-stock-confirm'),
     path('stock-alerts/active/', ActiveStockAlertView.as_view(), name='stock-alerts-active'),
 ] + router.urls

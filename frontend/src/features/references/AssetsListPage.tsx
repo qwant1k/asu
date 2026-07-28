@@ -194,16 +194,17 @@ const AssetsListPage: React.FC = () => {
         ordering,
       };
 
-      const [assetsRes, categoriesRes] = await Promise.all([
+      const [assetsRes, categoriesRes] = await Promise.allSettled([
         api.get<PaginatedResponse<Asset>>('/references/assets/', { params: assetParams }),
         api.get<PaginatedResponse<AssetCategory>>('/references/asset-categories/', {
-          params: { page_size: 300, asset_type: activeTab, ordering: 'name' },
+          params: { page_size: 100, asset_type: activeTab, ordering: 'name' },
         }),
       ]);
-      setAssets(assetsRes.data.results || []);
-      setCategories(categoriesRes.data.results || []);
+      setAssets(assetsRes.status === 'fulfilled' ? (assetsRes.value.data.results || []) : []);
+      setCategories(categoriesRes.status === 'fulfilled' ? (categoriesRes.value.data.results || []) : []);
     } catch {
       setAssets([]);
+      setCategories([]);
     } finally {
       setLoading(false);
     }
@@ -214,21 +215,16 @@ const AssetsListPage: React.FC = () => {
   ]);
 
   const fetchDictionaries = useCallback(async () => {
-    try {
-      const [unitRes, warehouseRes] = await Promise.all([
-        api.get<PaginatedResponse<UnitOfMeasure>>('/references/units-of-measure/', {
-          params: { page_size: 500, is_active: true, ordering: 'name' },
-        }),
-        api.get<PaginatedResponse<Warehouse>>('/references/warehouses/', {
-          params: { page_size: 500, is_active: true, ordering: 'name' },
-        }),
-      ]);
-      setUnits(unitRes.data.results || []);
-      setWarehouses(warehouseRes.data.results || []);
-    } catch {
-      setUnits([]);
-      setWarehouses([]);
-    }
+    const [unitRes, warehouseRes] = await Promise.allSettled([
+      api.get<PaginatedResponse<UnitOfMeasure>>('/references/units-of-measure/', {
+        params: { page_size: 100, is_active: true, ordering: 'name' },
+      }),
+      api.get<PaginatedResponse<Warehouse>>('/references/warehouses/', {
+        params: { page_size: 100, is_active: true, ordering: 'name' },
+      }),
+    ]);
+    setUnits(unitRes.status === 'fulfilled' ? (unitRes.value.data.results || []) : []);
+    setWarehouses(warehouseRes.status === 'fulfilled' ? (warehouseRes.value.data.results || []) : []);
   }, []);
 
   useEffect(() => { fetchData(); }, [fetchData]);

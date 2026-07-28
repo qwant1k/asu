@@ -3,8 +3,12 @@ import string
 from collections import Counter
 from io import BytesIO
 
+from django.contrib.auth.models import Permission
+from django.contrib.contenttypes.models import ContentType
+from django.core.management.color import no_style
 from django.contrib.auth import password_validation
 from django.core.exceptions import ValidationError as DjangoValidationError
+from django.db import connection, transaction
 from django.http import HttpResponse
 from django.utils import timezone
 from openpyxl import Workbook
@@ -180,6 +184,92 @@ class CurrentUserView(generics.RetrieveUpdateAPIView):
         context = super().get_serializer_context()
         context['request'] = self.request
         return context
+
+
+class DatabaseResetView(APIView):
+    """Delete all stored data and recreate only the requesting superuser."""
+
+    permission_classes = [IsAuthenticated]
+    confirmation_phrase = 'ОЧИСТИТЬ БАЗУ'
+
+    def post(self, request):
+        user = request.user
+        if not user.is_superuser:
+            return Response(
+                {'detail': 'Полная очистка базы данных доступна только суперпользователю.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        password = request.data.get('current_password', '')
+        confirmation = request.data.get('confirmation', '')
+        if not password or not user.check_password(password):
+            return Response(
+                {'current_password': ['Неверный текущий пароль администратора.']},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if confirmation != self.confirmation_phrase:
+            return Response(
+                {'confirmation': [f'Введите точную фразу: {self.confirmation_phrase}']},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        preserved_values = {
+            field.attname: getattr(user, field.attname)
+            for field in User._meta.concrete_fields
+        }
+        preserved_values.update(
+            {
+                'department_id': None,
+                'position_ref_id': None,
+                'supervisor_id': None,
+                'position': '',
+                'role': 'ADMIN',
+                'is_active': True,
+                'is_staff': True,
+                'is_superuser': True,
+            }
+        )
+
+        excluded_tables = {
+            ContentType._meta.db_table,
+            Permission._meta.db_table,
+        }
+        existing_tables = connection.introspection.django_table_names(
+            only_existing=True,
+            include_views=False,
+        )
+        tables_to_clear = sorted(set(existing_tables) - excluded_tables)
+        sql_list = connection.ops.sql_flush(
+            no_style(),
+            tables_to_clear,
+            reset_sequences=True,
+            allow_cascade=True,
+        )
+
+        with transaction.atomic():
+            with connection.cursor() as cursor:
+                for sql in sql_list:
+                    cursor.execute(sql)
+
+            # bulk_create intentionally bypasses model audit signals: after reset
+            # the database must contain no business records other than this admin.
+            User.objects.bulk_create([User(**preserved_values)])
+
+            sequence_sql = connection.ops.sequence_reset_sql(no_style(), [User])
+            with connection.cursor() as cursor:
+                for sql in sequence_sql:
+                    cursor.execute(sql)
+
+        return Response(
+            {
+                'detail': 'База данных очищена. Сохранена только текущая учетная запись администратора.',
+                'preserved_user': {
+                    'id': preserved_values[User._meta.pk.attname],
+                    'username': preserved_values['username'],
+                },
+            },
+            status=status.HTTP_200_OK,
+        )
 
 
 class UserViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):

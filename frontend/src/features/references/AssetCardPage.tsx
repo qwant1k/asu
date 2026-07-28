@@ -109,26 +109,20 @@ const AssetCardPage: React.FC = () => {
   }, [id]);
 
   const fetchDictionaries = useCallback(async (assetType: string) => {
-    try {
-      const [categoryRes, unitRes, warehouseRes] = await Promise.all([
-        api.get<PaginatedResponse<AssetCategory>>('/references/asset-categories/', {
-          params: { page_size: 300, asset_type: baseAssetType(assetType), ordering: 'name' },
-        }),
-        api.get<PaginatedResponse<UnitOfMeasure>>('/references/units-of-measure/', {
-          params: { page_size: 500, is_active: true, ordering: 'name' },
-        }),
-        api.get<PaginatedResponse<Warehouse>>('/references/warehouses/', {
-          params: { page_size: 500, is_active: true, ordering: 'name' },
-        }),
-      ]);
-      setCategories(categoryRes.data.results || []);
-      setUnits(unitRes.data.results || []);
-      setWarehouses(warehouseRes.data.results || []);
-    } catch {
-      setCategories([]);
-      setUnits([]);
-      setWarehouses([]);
-    }
+    const [categoryRes, unitRes, warehouseRes] = await Promise.allSettled([
+      api.get<PaginatedResponse<AssetCategory>>('/references/asset-categories/', {
+        params: { page_size: 100, asset_type: baseAssetType(assetType), ordering: 'name' },
+      }),
+      api.get<PaginatedResponse<UnitOfMeasure>>('/references/units-of-measure/', {
+        params: { page_size: 100, is_active: true, ordering: 'name' },
+      }),
+      api.get<PaginatedResponse<Warehouse>>('/references/warehouses/', {
+        params: { page_size: 100, is_active: true, ordering: 'name' },
+      }),
+    ]);
+    setCategories(categoryRes.status === 'fulfilled' ? (categoryRes.value.data.results || []) : []);
+    setUnits(unitRes.status === 'fulfilled' ? (unitRes.value.data.results || []) : []);
+    setWarehouses(warehouseRes.status === 'fulfilled' ? (warehouseRes.value.data.results || []) : []);
   }, []);
 
   useEffect(() => { fetchCard(); }, [fetchCard]);

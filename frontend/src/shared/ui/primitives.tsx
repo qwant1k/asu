@@ -1,9 +1,7 @@
 ﻿import React from 'react';
-import { Select as AntSelect } from 'antd';
+import { Drawer as AntDrawer, Modal as AntModal } from 'antd';
 import { useNavigate } from 'react-router-dom';
 import { AnimatedButton } from './animated/AnimatedButton';
-import { AnimatedModal } from './animated/AnimatedModal';
-import { motion, AnimatePresence, useReducedMotion } from './animated/animations';
 import { C, statusColors } from './tokens';
 import { useBreadcrumbPageTitle } from '../navigation/breadcrumbs';
 
@@ -330,6 +328,7 @@ interface SelectFieldProps {
   options: { value: string | number; label: string }[];
   value?: string | number;
   onChange?: React.ChangeEventHandler<HTMLSelectElement>;
+  onValueChange?: (value: string) => void;
   disabled?: boolean;
   placeholder?: string;
   style?: React.CSSProperties;
@@ -338,34 +337,36 @@ interface SelectFieldProps {
 }
 
 export function SelectField({
-  label, options, style, value, onChange, disabled, placeholder, className, name,
+  label, options, style, value, onChange, onValueChange, disabled, placeholder, className, name,
 }: SelectFieldProps) {
+  const handleChange = (event: React.ChangeEvent<HTMLSelectElement>) => {
+    const normalizedValue = event.target.value;
+    onValueChange?.(normalizedValue);
+    onChange?.(event);
+  };
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
       {label && <label style={{ fontSize: 12, fontWeight: 650, color: C.heading }}>{label}</label>}
       <div className="ui-select-control" style={{ width: '100%', minWidth: 150, ...style }}>
-        <AntSelect
-          value={value === undefined || value === null ? undefined : String(value)}
+        <select
+          value={value === undefined || value === null ? '' : String(value)}
           disabled={disabled}
-          placeholder={placeholder}
-          options={options.map((option) => ({
-            ...option,
-            value: String(option.value),
-          }))}
-          showSearch={options.length > 8}
-          optionFilterProp="label"
-          popupClassName="ui-select-dropdown"
-          className={`ui-select-field${className ? ` ${className}` : ''}`}
-          suffixIcon={null}
+          name={name}
+          aria-label={label || placeholder || name}
+          className={`ui-select-field ui-native-select${className ? ` ${className}` : ''}`}
           style={{ width: '100%' }}
-          onChange={(nextValue) => {
-            if (!onChange) return;
-            onChange({
-              target: { value: String(nextValue ?? ''), name: name || '' },
-              currentTarget: { value: String(nextValue ?? ''), name: name || '' },
-            } as React.ChangeEvent<HTMLSelectElement>);
-          }}
-        />
+          onChange={handleChange}
+        >
+          {placeholder && !options.some((option) => String(option.value) === '') && (
+            <option value="" disabled>{placeholder}</option>
+          )}
+          {options.map((option) => (
+            <option key={String(option.value)} value={String(option.value)}>
+              {option.label}
+            </option>
+          ))}
+        </select>
         <span className="ui-select-arrow-overlay" aria-hidden="true">
           <span className="ui-select-chevron" />
         </span>
@@ -418,9 +419,16 @@ interface ModalProps {
 
 export function Modal({ open, onClose, title, width = 520, children, footer }: ModalProps) {
   return (
-    <AnimatedModal open={open} onClose={onClose} title={title} width={width} footer={footer}>
+    <AntModal
+      open={open}
+      onCancel={onClose}
+      title={title}
+      width={width}
+      footer={footer}
+      centered
+    >
       {children}
-    </AnimatedModal>
+    </AntModal>
   );
 }
 
@@ -434,71 +442,17 @@ interface DrawerProps {
 }
 
 export function Drawer({ open, onClose, title, width = 480, children, footer }: DrawerProps) {
-  const reduced = useReducedMotion();
-  const duration = reduced ? 0 : 0.25;
   return (
-    <AnimatePresence>
-      {open && [
-        <motion.div
-          key="drawer-overlay"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          transition={{ duration }}
-          className="ui-overlay"
-          onClick={onClose}
-          style={{
-            position: 'fixed',
-            inset: 0,
-            background: 'rgba(15, 23, 42, 0.24)',
-            zIndex: 100,
-          }}
-        />,
-        <motion.div
-          key="drawer-panel"
-          initial={{ opacity: 0, x: width }}
-          animate={{ opacity: 1, x: 0 }}
-          exit={{ opacity: 0, x: width }}
-          transition={{ duration, ease: [0, 0, 0.2, 1] }}
-          className="ui-drawer"
-          onClick={(e) => e.stopPropagation()}
-          style={{
-            position: 'fixed',
-            top: 12,
-            right: 12,
-            bottom: 12,
-            width,
-            maxWidth: 'calc(100% - 24px)',
-            background: '#FFFFFF',
-            borderRadius: C.radiusLg,
-            display: 'flex',
-            flexDirection: 'column',
-            boxShadow: C.shadow,
-            border: `1px solid ${C.border}`,
-            overflow: 'hidden',
-            zIndex: 101,
-          }}
-        >
-          <div style={{ padding: '16px 22px', borderBottom: `1px solid ${C.rowBorder}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 16 }}>
-            <span style={{ fontSize: 16, fontWeight: 750, color: C.heading }}>{title}</span>
-            <button
-              className="ui-icon-button"
-              onClick={onClose}
-              aria-label="Close"
-              style={{ width: 30, height: 30, borderRadius: 999, background: C.surfaceSoft, border: `1px solid ${C.border}`, color: C.secondary, cursor: 'pointer' }}
-            >
-              x
-            </button>
-          </div>
-          <div style={{ flex: 1, overflow: 'auto', padding: 22 }}>{children}</div>
-          {footer && (
-            <div style={{ padding: '16px 22px', borderTop: `1px solid ${C.rowBorder}`, display: 'flex', gap: 10, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
-              {footer}
-            </div>
-          )}
-        </motion.div>,
-      ]}
-    </AnimatePresence>
+    <AntDrawer
+      open={open}
+      onClose={onClose}
+      title={title}
+      width={width}
+      footer={footer}
+      placement="right"
+    >
+      {children}
+    </AntDrawer>
   );
 }
 
@@ -657,14 +611,14 @@ interface PopconfirmProps {
 
 export function Popconfirm({ open, onClose, onConfirm, title, confirmText = 'Да', cancelText = 'Отмена' }: PopconfirmProps) {
   return (
-    <AnimatedModal open={open} onClose={onClose} width={380} footer={
+    <AntModal open={open} onCancel={onClose} width={380} centered footer={
       <>
         <Btn variant="secondary" onClick={onClose}>{cancelText}</Btn>
         <Btn variant="primary" onClick={onConfirm}>{confirmText}</Btn>
       </>
     }>
       <div style={{ fontSize: 14, fontWeight: 600, color: C.heading, lineHeight: 1.45 }}>{title}</div>
-    </AnimatedModal>
+    </AntModal>
   );
 }
 

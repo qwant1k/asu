@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
+  DeleteOutlined,
   EditOutlined,
   EyeOutlined,
   FilterOutlined,
@@ -12,6 +13,7 @@ import {
   SaveOutlined,
   UserAddOutlined,
 } from '@ant-design/icons';
+import { useAppSelector } from '../../app/hooks';
 import api from '../../api/axios';
 import type { Department, PaginatedResponse, Position, User, UserRole } from '../../shared/types';
 import {
@@ -40,6 +42,7 @@ const STAFF_OPTIONS = [
 const UsersAdminPage: React.FC = () => {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const { user: currentUser } = useAppSelector((state) => state.auth);
   const [data, setData] = useState<User[]>([]);
   const [loading, setLoading] = useState(false);
   const [total, setTotal] = useState(0);
@@ -67,6 +70,11 @@ const UsersAdminPage: React.FC = () => {
   const [newPasswordConfirm, setNewPasswordConfirm] = useState('');
   const [passwordError, setPasswordError] = useState('');
   const [changingPassword, setChangingPassword] = useState(false);
+  const [databaseResetOpen, setDatabaseResetOpen] = useState(false);
+  const [databaseResetPassword, setDatabaseResetPassword] = useState('');
+  const [databaseResetConfirmation, setDatabaseResetConfirmation] = useState('');
+  const [databaseResetError, setDatabaseResetError] = useState('');
+  const [databaseResetting, setDatabaseResetting] = useState(false);
 
   const [fUsername, setFUsername] = useState('');
   const [fPassword, setFPassword] = useState('');
@@ -104,20 +112,14 @@ const UsersAdminPage: React.FC = () => {
   }, [activeFilter, departmentFilter, joinedAfter, joinedBefore, page, roleFilter, search, staffFilter]);
 
   const fetchReferences = useCallback(async () => {
-    try {
-      const [deptRes, usersRes, positionRes] = await Promise.all([
-        api.get<PaginatedResponse<Department>>('/departments/', { params: { page_size: 500, ordering: 'name' } }),
-        api.get<PaginatedResponse<User>>('/users/', { params: { page_size: 500, is_active: true, ordering: 'last_name' } }),
-        api.get<PaginatedResponse<Position>>('/references/positions/', { params: { page_size: 500, is_active: true, ordering: 'name' } }),
-      ]);
-      setDepartments(deptRes.data.results || []);
-      setSupervisors(usersRes.data.results || []);
-      setPositions(positionRes.data.results || []);
-    } catch {
-      setDepartments([]);
-      setSupervisors([]);
-      setPositions([]);
-    }
+    const [deptRes, usersRes, positionRes] = await Promise.allSettled([
+      api.get<PaginatedResponse<Department>>('/departments/', { params: { page_size: 100, ordering: 'name' } }),
+      api.get<PaginatedResponse<User>>('/users/', { params: { page_size: 100, is_active: true, ordering: 'last_name' } }),
+      api.get<PaginatedResponse<Position>>('/references/positions/', { params: { page_size: 100, is_active: true, ordering: 'name' } }),
+    ]);
+    setDepartments(deptRes.status === 'fulfilled' ? (deptRes.value.data.results || []) : []);
+    setSupervisors(usersRes.status === 'fulfilled' ? (usersRes.value.data.results || []) : []);
+    setPositions(positionRes.status === 'fulfilled' ? (positionRes.value.data.results || []) : []);
   }, []);
 
   useEffect(() => { fetchData(); }, [fetchData]);
@@ -268,6 +270,33 @@ const UsersAdminPage: React.FC = () => {
     setPage(1);
   };
 
+  const closeDatabaseReset = () => {
+    if (databaseResetting) return;
+    setDatabaseResetOpen(false);
+    setDatabaseResetPassword('');
+    setDatabaseResetConfirmation('');
+    setDatabaseResetError('');
+  };
+
+  const handleDatabaseReset = async () => {
+    setDatabaseResetting(true);
+    setDatabaseResetError('');
+    try {
+      await api.post('/users/database-reset/', {
+        current_password: databaseResetPassword,
+        confirmation: databaseResetConfirmation,
+      });
+      window.location.assign('/admin/users');
+    } catch (err: any) {
+      const responseData = err?.response?.data;
+      const message = responseData
+        ? Object.values(responseData).flat().join('; ')
+        : 'Не удалось очистить базу данных';
+      setDatabaseResetError(String(message));
+      setDatabaseResetting(false);
+    }
+  };
+
   const totalPages = Math.ceil(total / PAGE_SIZE);
   const roleOptions = ROLE_OPTIONS.map((role) => ({ value: role, label: t(`roles.${role}`, role) }));
   const departmentOptions = departments.map((dept) => ({ value: dept.id, label: `${dept.name} (${dept.code})` }));
@@ -290,7 +319,16 @@ const UsersAdminPage: React.FC = () => {
     <div>
       <PageHeader
         title={t('nav.users')}
-        right={<Btn onClick={openCreate}><UserAddOutlined /> Создать пользователя</Btn>}
+        right={(
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            {currentUser?.is_superuser && (
+              <Btn variant="danger" onClick={() => setDatabaseResetOpen(true)}>
+                <DeleteOutlined /> Очистить базу
+              </Btn>
+            )}
+            <Btn onClick={openCreate}><UserAddOutlined /> Создать пользователя</Btn>
+          </div>
+        )}
       />
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12, marginBottom: 16 }}>
@@ -417,17 +455,17 @@ const UsersAdminPage: React.FC = () => {
             <InputField label="Имя *" value={fFirst} onChange={(e) => setFFirst(e.target.value)} />
           </div>
           <InputField label="Отчество" value={fPatronymic} onChange={(e) => setFPatronymic(e.target.value)} />
-          <SelectField label="Должность" value={fPosition} onChange={(e) => setFPosition(e.target.value)}
+          <SelectField label="Должность" value={fPosition} onValueChange={setFPosition}
             options={[{ value: '', label: '— не выбрано —' }, ...positionOptions]} />
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
             <InputField label="Email" type="email" value={fEmail} onChange={(e) => setFEmail(e.target.value)} />
             <InputField label="Телефон" value={fPhone} onChange={(e) => setFPhone(e.target.value)} />
           </div>
-          <SelectField label="Подразделение" value={fDepartment} onChange={(e) => setFDepartment(e.target.value)}
+          <SelectField label="Подразделение" value={fDepartment} onValueChange={setFDepartment}
             options={[{ value: '', label: '— не выбрано —' }, ...departmentOptions]} />
-          <SelectField label="Непосредственный руководитель" value={fSupervisor} onChange={(e) => setFSupervisor(e.target.value)}
+          <SelectField label="Непосредственный руководитель" value={fSupervisor} onValueChange={setFSupervisor}
             options={[{ value: '', label: '— не выбрано —' }, ...supervisorOptions]} />
-          <SelectField label="Роль *" value={fRole} onChange={(e) => setFRole(e.target.value as UserRole)} options={roleOptions} />
+          <SelectField label="Роль *" value={fRole} onValueChange={(value) => setFRole(value as UserRole)} options={roleOptions} />
           <label style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, color: C.heading }}>
             <input type="checkbox" checked={fActive} onChange={(e) => setFActive(e.target.checked)} />
             Учетная запись активна
@@ -508,6 +546,56 @@ const UsersAdminPage: React.FC = () => {
         <div style={{ fontSize: 13, color: C.secondary, marginBottom: 8 }}>Передайте пароль пользователю защищенным каналом.</div>
         <div style={{ background: C.accentLight, padding: '12px 16px', borderRadius: C.radiusSm, fontWeight: 800, fontSize: 16, color: C.accent, letterSpacing: 0 }}>
           {tempPassword}
+        </div>
+      </Modal>
+
+      <Modal
+        open={databaseResetOpen}
+        onClose={closeDatabaseReset}
+        title="Полная очистка базы данных"
+        footer={(
+          <>
+            <Btn variant="secondary" onClick={closeDatabaseReset} disabled={databaseResetting}>
+              Отмена
+            </Btn>
+            <Btn
+              variant="danger"
+              onClick={handleDatabaseReset}
+              loading={databaseResetting}
+              disabled={
+                !databaseResetPassword
+                || databaseResetConfirmation !== 'ОЧИСТИТЬ БАЗУ'
+              }
+            >
+              <DeleteOutlined /> Очистить безвозвратно
+            </Btn>
+          </>
+        )}
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div style={{ padding: '12px 14px', borderRadius: C.radiusSm, background: C.dangerBg, color: C.danger, fontSize: 13, lineHeight: 1.55 }}>
+            Будут безвозвратно удалены все документы, справочники, складские остатки,
+            настройки, журналы и пользователи. Сохранится только ваша текущая учетная
+            запись суперпользователя. Отменить операцию после подтверждения нельзя.
+          </div>
+          {databaseResetError && (
+            <div style={{ background: C.dangerBg, color: C.danger, padding: '8px 12px', borderRadius: C.radiusSm, fontSize: 12 }}>
+              {databaseResetError}
+            </div>
+          )}
+          <InputField
+            label="Текущий пароль администратора"
+            type="password"
+            autoComplete="current-password"
+            value={databaseResetPassword}
+            onChange={(event) => setDatabaseResetPassword(event.target.value)}
+          />
+          <InputField
+            label='Для подтверждения введите «ОЧИСТИТЬ БАЗУ»'
+            value={databaseResetConfirmation}
+            autoComplete="off"
+            onChange={(event) => setDatabaseResetConfirmation(event.target.value)}
+          />
         </div>
       </Modal>
     </div>

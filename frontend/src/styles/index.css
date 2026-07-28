@@ -108,34 +108,19 @@ select option {
   font-size: 13px;
 }
 
-.ui-select-field .ant-select-selector {
-  border-radius: var(--radius-sm) !important;
-  border-color: #CBD5E1 !important;
-  padding: 0 46px 0 13px !important;
-  background: linear-gradient(180deg, #FFFFFF 0%, #FCFDFE 100%) !important;
-  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06) !important;
-  transition: border-color 0.18s var(--ease), box-shadow 0.18s var(--ease), background 0.18s var(--ease) !important;
-}
-
-.ui-select-field:hover .ant-select-selector {
-  border-color: #4A9CA3 !important;
-  background: linear-gradient(180deg, #FFFFFF 0%, #F4FAFA 100%) !important;
-}
-
-.ui-select-field.ant-select-focused .ant-select-selector,
-.ui-select-field.ant-select-open .ant-select-selector {
-  border-color: var(--accent) !important;
-  box-shadow: var(--focus-ring) !important;
-}
-
-.ui-select-field .ant-select-selection-item,
-.ui-select-field .ant-select-selection-placeholder {
-  font-size: 13px;
-  font-weight: 500;
-}
-
 .ui-select-control {
   position: relative;
+}
+
+.ui-native-select {
+  width: 100%;
+  background-image: linear-gradient(180deg, #FFFFFF 0%, #FCFDFE 100%) !important;
+  padding-right: 46px !important;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06);
+}
+
+.ui-native-select:hover:not(:disabled) {
+  background-image: linear-gradient(180deg, #FFFFFF 0%, #F4FAFA 100%) !important;
 }
 
 .ui-select-arrow-overlay {
@@ -164,7 +149,7 @@ select option {
   background: #E5F2F3;
 }
 
-.ui-select-control:has(.ant-select-open) .ui-select-arrow-overlay {
+.ui-select-control:has(.ui-native-select:focus) .ui-select-arrow-overlay {
   border-color: #72B4BA;
   background: #DDF0F1;
   box-shadow: 0 0 0 2px rgba(14, 124, 134, 0.10);
@@ -178,37 +163,6 @@ select option {
   border-bottom: 2px solid #0B646C;
   transform: rotate(45deg);
   transition: transform 0.22s var(--spring), margin 0.22s var(--spring);
-}
-
-.ui-select-control:has(.ant-select-open) .ui-select-chevron {
-  margin-top: 4px;
-  transform: rotate(225deg);
-}
-
-.ui-select-dropdown {
-  padding: 6px !important;
-  border: 1px solid #DCE3EA;
-  border-radius: 10px !important;
-  background: rgba(255, 255, 255, 0.98);
-  box-shadow: var(--shadow-floating) !important;
-}
-
-.ui-select-dropdown .ant-select-item {
-  min-height: 36px;
-  padding: 8px 10px;
-  border-radius: 7px;
-  font-size: 13px;
-  transition: background-color 0.14s var(--ease), color 0.14s var(--ease);
-}
-
-.ui-select-dropdown .ant-select-item-option-selected {
-  background: #E6F4F5 !important;
-  color: var(--accent-dark);
-  font-weight: 650;
-}
-
-.ui-select-dropdown .ant-select-item-option-active:not(.ant-select-item-option-selected) {
-  background: #F0F7F8 !important;
 }
 
 .trash-status-badge {

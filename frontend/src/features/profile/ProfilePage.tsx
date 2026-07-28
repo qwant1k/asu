@@ -22,7 +22,7 @@ import { authApi } from '../../api/auth';
 import { fetchCurrentUser } from '../auth/authSlice';
 import type { AssetRequest, Department, Notification, PaginatedResponse, User } from '../../shared/types';
 import {
-  C, Btn, Badge, InputField, SelectField, StatCard, Spinner, EmptyState, Modal, Tabs,
+  Btn, Badge, InputField, SelectField, Spinner, EmptyState, Modal, Tabs,
 } from '../../shared/ui/primitives';
 import './profile.css';
 import { usePageBreadcrumbs } from '../../shared/navigation/breadcrumbs';
@@ -112,20 +112,29 @@ const ProfilePage: React.FC = () => {
           },
         });
         const tasks: Promise<any>[] = [
-          api.get('/departments/', { params: { page_size: 300, ordering: 'name' } }),
+          api.get('/departments/', { params: { page_size: 100, ordering: 'name' } }),
           profileReq,
           reqsReq,
         ];
         if (isOwnProfile) tasks.push(api.get('/notifications/', { params: { page_size: 20 } }));
 
-        const responses = await Promise.all(tasks);
+        const responses = await Promise.allSettled(tasks);
         if (!active) return;
-        setDepartments(responses[0].data.results || []);
-        const pUser = responses[1].data;
+        setDepartments(responses[0].status === 'fulfilled' ? (responses[0].value.data.results || []) : []);
+        if (responses[1].status !== 'fulfilled') {
+          setProfileUser(null);
+          return;
+        }
+        const pUser = responses[1].value.data;
         setProfileUser(pUser);
         resetFormFields(pUser);
-        setRequests(responses[2].data.results || []);
-        setNotifications(isOwnProfile ? (responses[3]?.data.results || []) : []);
+        setRequests(responses[2].status === 'fulfilled' ? (responses[2].value.data.results || []) : []);
+        const notificationResponse = responses[3];
+        setNotifications(
+          isOwnProfile && notificationResponse?.status === 'fulfilled'
+            ? (notificationResponse.value.data.results || [])
+            : [],
+        );
       } catch {
         if (active) setProfileUser(null);
       } finally {
@@ -269,19 +278,6 @@ const ProfilePage: React.FC = () => {
   return (
     <div className="profile-page">
       <section className="profile-hero">
-        <div className="profile-hero__top">
-          {!isOwnProfile && (
-            <Btn variant="secondary" onClick={() => navigate(-1)}>
-              <ArrowLeftOutlined /> {t('common.back')}
-            </Btn>
-          )}
-          {isOwnProfile && (
-            <Btn onClick={openEditProfile}>
-              <EditOutlined /> Изменить профиль
-            </Btn>
-          )}
-        </div>
-
         <div className="profile-hero__main">
           <div className="profile-photo">
             {currentPhoto ? (
@@ -292,9 +288,23 @@ const ProfilePage: React.FC = () => {
           </div>
 
           <div className="profile-identity">
-            <div className="profile-identity__badges">
-              <Badge status={roleLabel} />
-              <Badge status={profileUser.is_active ? 'Активен' : 'Неактивен'} />
+            <div className="profile-identity__header">
+              <div className="profile-identity__badges">
+                <Badge status={roleLabel} />
+                <Badge status={profileUser.is_active ? 'Активен' : 'Неактивен'} />
+              </div>
+              <div className="profile-hero__actions">
+                {!isOwnProfile && (
+                  <Btn variant="secondary" onClick={() => navigate(-1)}>
+                    <ArrowLeftOutlined /> {t('common.back')}
+                  </Btn>
+                )}
+                {isOwnProfile && (
+                  <Btn onClick={openEditProfile}>
+                    <EditOutlined /> Изменить
+                  </Btn>
+                )}
+              </div>
             </div>
             <h1>{profileUser.full_name || profileUser.username}</h1>
             <p>{displayPosition}</p>
@@ -317,9 +327,21 @@ const ProfilePage: React.FC = () => {
       </section>
 
       <div className="profile-stats">
-        <StatCard label="Заявки" value={requests.length} sub="история сотрудника" />
-        <StatCard label={isOwnProfile ? 'Непрочитанные' : 'Последний вход'} value={isOwnProfile ? unreadCount : fmt(profileUser.last_login)} sub={isOwnProfile ? 'в колокольчике' : 'активность'} color={C.info} />
-        <StatCard label="Права доступа" value={profileUser.effective_permissions?.length || 0} sub={roleLabel} color={C.teal} />
+        <div className="profile-stat-card">
+          <span>Заявки</span>
+          <strong>{requests.length}</strong>
+          <small>история сотрудника</small>
+        </div>
+        <div className="profile-stat-card profile-stat-card--info">
+          <span>{isOwnProfile ? 'Непрочитанные' : 'Последний вход'}</span>
+          <strong>{isOwnProfile ? unreadCount : fmt(profileUser.last_login)}</strong>
+          <small>{isOwnProfile ? 'в уведомлениях' : 'активность'}</small>
+        </div>
+        <div className="profile-stat-card profile-stat-card--teal">
+          <span>Права доступа</span>
+          <strong>{profileUser.effective_permissions?.length || 0}</strong>
+          <small>{roleLabel}</small>
+        </div>
       </div>
 
       <div className="profile-tabs-bar">

@@ -6,6 +6,7 @@ from rest_framework.routers import DefaultRouter
 from .views import (
     AccessMatrixExportView,
     AccessDefinitionView,
+    DatabaseResetView,
     EffectiveUserAccessView,
     PositionAccessRuleViewSet,
     UserAccessOverrideViewSet,
@@ -20,6 +21,7 @@ router.register('access/user-overrides', UserAccessOverrideViewSet, basename='us
 router.register('', UserViewSet, basename='users')
 
 urlpatterns = [
+    path('database-reset/', DatabaseResetView.as_view(), name='database-reset'),
     path('access/definitions/', AccessDefinitionView.as_view(), name='access-definitions'),
     path('access/effective/<int:user_id>/', EffectiveUserAccessView.as_view(), name='access-effective'),
     path('access/matrix/export/', AccessMatrixExportView.as_view(), name='access-matrix-export'),

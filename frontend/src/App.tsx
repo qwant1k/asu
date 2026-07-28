@@ -2,12 +2,25 @@
 
 import React, { useEffect } from 'react';
 import { Routes, Route, Navigate, useParams } from 'react-router-dom';
+import {
+  AppstoreOutlined,
+  DatabaseOutlined,
+  DeleteOutlined,
+  InboxOutlined,
+  PlusOutlined,
+  ProfileOutlined,
+  SettingOutlined,
+  SwapOutlined,
+  TeamOutlined,
+  WarningOutlined,
+} from '@ant-design/icons';
 import { useAppSelector, useAppDispatch } from './app/hooks';
 import { fetchCurrentUser } from './features/auth/authSlice';
 import { hasAnyAccess, isManagerUser } from './shared/auth/access';
 
 import ProtectedRoute from './shared/components/ProtectedRoute';
 import AppLayout from './shared/components/AppLayout';
+import MenuTilePage from './shared/components/MenuTilePage';
 
 /* Auth */
 import LoginPage from './features/auth/LoginPage';
@@ -95,7 +108,7 @@ const DefaultEntry: React.FC = () => {
   const { isAuthenticated, user } = useAppSelector((state) => state.auth);
   if (!isAuthenticated) return <Navigate to="/login" replace />;
   if (!user) return null;
-  return <Navigate to={isManagerUser(user) ? '/dashboard' : '/requests'} replace />;
+  return <Navigate to={isManagerUser(user) ? '/dashboard' : '/requests/journal'} replace />;
 };
 
 const App: React.FC = () => {
@@ -138,6 +151,12 @@ const App: React.FC = () => {
           <Route path="/assets/:id" element={<AccessOnly anyOf={['references.manage', 'warehouse.view']}><AssetCardPage /></AccessOnly>} />
 
           {/* Склад */}
+          <Route path="/warehouse" element={<AccessOnly anyOf={['warehouse.view']}><MenuTilePage title="Склад" subtitle="Учёт и движение активов" tiles={[
+            { path: '/warehouse/stock', label: 'Остатки на складе', icon: <InboxOutlined />, description: 'Текущие остатки по складам' },
+            { path: '/warehouse/stock-alerts', label: 'Алармы остатков', icon: <WarningOutlined />, description: 'Контроль критических остатков' },
+            { path: '/warehouse/movements', label: 'Движения', icon: <SwapOutlined />, description: 'Журнал движения активов' },
+            { path: '/warehouse/assignments', label: 'Закрепления', icon: <TeamOutlined />, description: 'Активы за сотрудниками' },
+          ]} /></AccessOnly>} />
           <Route path="/warehouse/stock" element={<AccessOnly anyOf={['warehouse.view']}><WarehouseStockPage /></AccessOnly>} />
           <Route path="/warehouse/stock/upload" element={<Navigate to="/admin/stock-upload" replace />} />
           <Route path="/warehouse/stock-alerts" element={<AccessOnly anyOf={['warehouse.view']}><StockAlertsPage /></AccessOnly>} />
@@ -145,7 +164,11 @@ const App: React.FC = () => {
           <Route path="/warehouse/assignments" element={<AccessOnly anyOf={['warehouse.view']}><AssignmentsPage /></AccessOnly>} />
 
           {/* Заявки */}
-          <Route path="/requests" element={<RequestsPage />} />
+          <Route path="/requests" element={<MenuTilePage title="Заявки" subtitle="Создание и обработка заявок" tiles={[
+            { path: '/requests/new', label: 'Новая заявка', icon: <PlusOutlined />, description: 'Создать новую заявку на выдачу' },
+            { path: '/requests/journal', label: 'Журнал заявок', icon: <ProfileOutlined />, description: 'Просмотр и отслеживание заявок' },
+          ]} />} />
+          <Route path="/requests/journal" element={<RequestsPage />} />
           <Route path="/requests/new" element={<RequestCreatePage />} />
           <Route path="/requests/:id/edit" element={<RequestCreatePage />} />
           <Route path="/requests/:id" element={<RequestDetailPage />} />
@@ -175,6 +198,13 @@ const App: React.FC = () => {
           <Route path="/reports/*" element={<AccessOnly anyOf={['reports.view']}><ReportsPage /></AccessOnly>} />
 
           {/* Администрирование */}
+          <Route path="/admin" element={<AccessOnly anyOf={['users.manage', 'access.manage', 'system.admin', 'integrations.sync']}><MenuTilePage title="Администрирование" subtitle="Управление системой" tiles={[
+            { path: '/admin/users', label: 'Пользователи', icon: <TeamOutlined />, description: 'Управление учётными записями' },
+            { path: '/admin/access', label: 'Права доступа', icon: <SettingOutlined />, description: 'Роли и разрешения' },
+            { path: '/admin/sync-1c', label: 'Синхронизация с 1С', icon: <DatabaseOutlined />, description: 'Интеграция с 1С' },
+            { path: '/admin/stock-upload', label: 'Загрузка остатков', icon: <AppstoreOutlined />, description: 'Импорт из Excel' },
+            { path: '/admin/trash', label: 'Удалённые объекты', icon: <DeleteOutlined />, description: 'Корзина системы' },
+          ]} /></AccessOnly>} />
           <Route path="/admin/users" element={<AccessOnly anyOf={['users.manage']}><UsersAdminPage /></AccessOnly>} />
           <Route path="/admin/access" element={<AccessOnly anyOf={['access.manage']}><AdminAccessPage /></AccessOnly>} />
           <Route path="/admin/sync-1c" element={<ManagerOnly><Sync1CPage /></ManagerOnly>} />

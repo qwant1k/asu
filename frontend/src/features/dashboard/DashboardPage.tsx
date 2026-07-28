@@ -156,13 +156,13 @@ const DashboardPage: React.FC = () => {
       />
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12, marginBottom: 14 }}>
-        <div style={{ cursor: 'pointer' }} onClick={() => navigate('/requests')}>
+        <div style={{ cursor: 'pointer' }} onClick={() => navigate('/requests/journal')}>
           <StatCard label={t('dashboard.myRequests')} value={myRequestsTotal} sub="Всего заявок" icon={<FileTextOutlined />} />
         </div>
-        <div style={{ cursor: 'pointer' }} onClick={() => navigate('/requests')}>
+        <div style={{ cursor: 'pointer' }} onClick={() => navigate('/requests/journal')}>
           <StatCard label={t('dashboard.myInProgress')} value={myInProgress} sub="В процессе" icon={<ClockCircleOutlined />} color={C.info} />
         </div>
-        <div style={{ cursor: 'pointer' }} onClick={() => navigate('/requests')}>
+        <div style={{ cursor: 'pointer' }} onClick={() => navigate('/requests/journal')}>
           <StatCard label={t('dashboard.approvedReady')} value={myApproved} sub="К получению" color={myApproved > 0 ? C.success : undefined} icon={<CheckCircleOutlined />} />
         </div>
         <div>
@@ -176,7 +176,7 @@ const DashboardPage: React.FC = () => {
           gridTemplateColumns: isWarehouseKeeper ? 'repeat(auto-fit, minmax(180px, 1fr))' : 'minmax(180px, 320px)',
           gap: 12, marginBottom: 16,
         }}>
-          <div style={{ cursor: 'pointer' }} onClick={() => navigate('/requests')}>
+          <div style={{ cursor: 'pointer' }} onClick={() => navigate('/requests/journal')}>
             <StatCard label={t('dashboard.pendingApprovals')} value={pendingApprovalCount} sub="Требуют решения" color={pendingApprovalCount > 0 ? C.danger : undefined} icon={<AlertOutlined />} />
           </div>
           {isWarehouseKeeper && (
@@ -202,7 +202,7 @@ const DashboardPage: React.FC = () => {
               {myRecent.map((r) => (
                 <RequestRow key={r.id} r={r} sub={r.request_type_name} onClick={() => navigate(`/requests/${r.id}`)} />
               ))}
-              <ViewAllLink onClick={() => navigate('/requests')} label={t('dashboard.viewAll')} />
+              <ViewAllLink onClick={() => navigate('/requests/journal')} label={t('dashboard.viewAll')} />
             </div>
           )}
         </Panel>
@@ -217,7 +217,7 @@ const DashboardPage: React.FC = () => {
                 {pendingApprovalList.map((r) => (
                   <RequestRow key={r.id} r={r} sub={r.initiator_name} onClick={() => navigate(`/requests/${r.id}`)} />
                 ))}
-                <ViewAllLink onClick={() => navigate('/requests')} label={t('dashboard.viewAll')} />
+                <ViewAllLink onClick={() => navigate('/requests/journal')} label={t('dashboard.viewAll')} />
               </div>
             )}
           </Panel>

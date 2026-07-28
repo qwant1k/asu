@@ -40,6 +40,7 @@ interface NavItem {
   icon: React.ReactNode;
   label: string;
   path?: string;
+  menuPath?: string;
   children?: { path: string; label: string; roles?: string[]; access?: string }[];
   roles?: string[];
   access?: string;
@@ -131,6 +132,7 @@ const AppLayout: React.FC = () => {
       id: 'references',
       icon: <BookOutlined />,
       label: t('nav.references'),
+      menuPath: '/references',
       children: [
         { path: '/references/counterparties', label: t('nav.counterparties') },
         { path: '/references/contracts', label: t('nav.contracts') },
@@ -150,6 +152,7 @@ const AppLayout: React.FC = () => {
       id: 'warehouse',
       icon: <InboxOutlined />,
       label: t('nav.warehouse'),
+      menuPath: '/warehouse',
       children: [
         { path: '/warehouse/stock', label: t('nav.stock') },
         { path: '/warehouse/stock-alerts', label: 'Алармы остатков', access: 'warehouse.upload' },
@@ -161,8 +164,9 @@ const AppLayout: React.FC = () => {
       id: 'requests',
       icon: <FormOutlined />,
       label: t('nav.requests'),
+      menuPath: '/requests',
       children: [
-        { path: '/requests', label: t('nav.requestJournal') },
+        { path: '/requests/journal', label: t('nav.requestJournal') },
         { path: '/requests/new', label: t('nav.newRequest') },
       ],
     },
@@ -170,6 +174,7 @@ const AppLayout: React.FC = () => {
       id: 'documents',
       icon: <FileTextOutlined />,
       label: t('nav.documents'),
+      menuPath: '/documents',
       children: [
         { path: '/documents/incoming-invoices', label: t('nav.incomingInvoices') },
         { path: '/documents/write-off-acts', label: t('nav.writeOffActs') },
@@ -183,6 +188,7 @@ const AppLayout: React.FC = () => {
       id: 'reports',
       icon: <BarChartOutlined />,
       label: t('nav.reports'),
+      menuPath: '/reports',
       children: [
         { path: '/reports/tmz-stock', label: t('reports.tmzStock') },
         { path: '/reports/os-balance', label: t('reports.osBalance') },
@@ -198,6 +204,7 @@ const AppLayout: React.FC = () => {
       id: 'admin',
       icon: <SettingOutlined />,
       label: t('nav.admin'),
+      menuPath: '/admin',
       children: [
         { path: '/admin/users', label: t('nav.users'), access: 'users.manage' },
         { path: '/admin/access', label: 'Права доступа', access: 'access.manage' },
@@ -210,6 +217,7 @@ const AppLayout: React.FC = () => {
 
   const isActive = (item: NavItem) => {
     if (item.path) return location.pathname === item.path;
+    if (item.menuPath && location.pathname === item.menuPath) return true;
     return item.children?.some((c) => location.pathname.startsWith(c.path)) || false;
   };
 
@@ -226,7 +234,7 @@ const AppLayout: React.FC = () => {
         : item
     ));
   }, [customBreadcrumbItems, pageBreadcrumbTitle, resolvedBreadcrumbs]);
-  const homePath = isManager ? '/dashboard' : '/requests';
+  const homePath = isManager ? '/dashboard' : '/requests/journal';
   const headerBreadcrumbItems = useMemo(() => {
     const hasRoot = routeBreadcrumbItems[0]?.label === 'ИС «АСУ»';
     return hasRoot
@@ -389,7 +397,7 @@ const AppLayout: React.FC = () => {
             <button
               onClick={() => {
                 if (sidebarExpanded) {
-                  navigate(isManager ? '/dashboard' : '/requests');
+                  navigate(isManager ? '/dashboard' : '/requests/journal');
                 } else {
                   setSidebarExpanded(true);
                 }
@@ -461,73 +469,101 @@ const AppLayout: React.FC = () => {
                   />
                 )}
                 <Tooltip title={!sidebarExpanded ? n.label : undefined} placement="right" mouseEnterDelay={0.3}>
-                  <button
-                    className="icon-nav-btn"
-                    data-sidebar-preserve-action="true"
-                    aria-label={n.label}
-                    onClick={(e) => {
-                      if (n.path) {
-                        navigate(n.path);
-                        setFlyout(null);
-                        setFlyoutPos(null);
-                      } else if (flyout === n.id) {
-                        setFlyout(null);
-                        setFlyoutPos(null);
-                      } else {
-                        const rect = e.currentTarget.getBoundingClientRect();
-                        setFlyoutPos({ top: rect.top, left: rect.right + 12 });
-                        setFlyout(n.id);
-                      }
-                    }}
+                  <div
                     style={{
                       position: 'relative',
                       width: sidebarExpanded ? '100%' : 40,
                       height: 40,
-                      border: 'none',
-                      borderRadius: 8,
-                      background: active ? 'rgba(255, 255, 255, 0.08)' : 'transparent',
-                      color: active ? '#FFFFFF' : 'rgba(255, 255, 255, 0.62)',
-                      fontSize: 18,
                       display: 'inline-flex',
                       alignItems: 'center',
-                      justifyContent: sidebarExpanded ? 'flex-start' : 'center',
-                      cursor: 'pointer',
-                      paddingLeft: sidebarExpanded ? 12 : 0,
-                      paddingRight: sidebarExpanded ? 28 : 0,
-                      gap: sidebarExpanded ? 10 : 0,
+                      borderRadius: 8,
+                      background: active ? 'rgba(255, 255, 255, 0.08)' : 'transparent',
                     }}
                   >
-                    {n.icon}
-                    {sidebarExpanded && (
-                      <motion.span
-                        initial={{ opacity: 0, x: -6 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        transition={{ duration: reduced ? 0 : 0.15, ease: [0, 0, 0.2, 1] }}
-                        style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: active ? 600 : 500, color: active ? '#FFFFFF' : 'rgba(255, 255, 255, 0.62)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
-                      >
-                        {n.label}
-                      </motion.span>
-                    )}
+                    <button
+                      className="icon-nav-btn"
+                      data-sidebar-preserve-action="true"
+                      aria-label={n.label}
+                      onClick={() => {
+                        if (n.path) {
+                          navigate(n.path);
+                        } else if (n.menuPath) {
+                          navigate(n.menuPath);
+                        }
+                        setFlyout(null);
+                        setFlyoutPos(null);
+                      }}
+                      style={{
+                        position: 'relative',
+                        flex: 1,
+                        height: '100%',
+                        border: 'none',
+                        borderRadius: 8,
+                        background: 'transparent',
+                        color: active ? '#FFFFFF' : 'rgba(255, 255, 255, 0.62)',
+                        fontSize: 18,
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        justifyContent: sidebarExpanded ? 'flex-start' : 'center',
+                        cursor: 'pointer',
+                        paddingLeft: sidebarExpanded ? 12 : 0,
+                        paddingRight: n.children && sidebarExpanded ? 28 : 0,
+                        gap: sidebarExpanded ? 10 : 0,
+                      }}
+                    >
+                      {n.icon}
+                      {sidebarExpanded && (
+                        <motion.span
+                          initial={{ opacity: 0, x: -6 }}
+                          animate={{ opacity: 1, x: 0 }}
+                          transition={{ duration: reduced ? 0 : 0.15, ease: [0, 0, 0.2, 1] }}
+                          style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: active ? 600 : 500, color: active ? '#FFFFFF' : 'rgba(255, 255, 255, 0.62)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
+                        >
+                          {n.label}
+                        </motion.span>
+                      )}
+                    </button>
                     {n.children && (
-                      <motion.span
-                        animate={{ rotate: flyout === n.id ? 90 : 0 }}
-                        transition={{ duration: reduced ? 0 : 0.15, ease: [0, 0, 0.2, 1] }}
+                      <button
+                        data-sidebar-preserve-action="true"
+                        aria-label={`${n.label} — раскрыть`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (flyout === n.id) {
+                            setFlyout(null);
+                            setFlyoutPos(null);
+                          } else {
+                            const rect = e.currentTarget.getBoundingClientRect();
+                            setFlyoutPos({ top: rect.top, left: rect.right + 12 });
+                            setFlyout(n.id);
+                          }
+                        }}
                         style={{
                           position: 'absolute',
-                          right: 12,
+                          right: 0,
                           top: 0,
                           bottom: 0,
+                          width: 28,
+                          border: 'none',
+                          background: 'transparent',
+                          color: active ? '#FFFFFF' : 'rgba(255, 255, 255, 0.72)',
+                          fontSize: 11,
                           display: 'flex',
                           alignItems: 'center',
-                          fontSize: 11,
-                          color: active ? '#FFFFFF' : 'rgba(255, 255, 255, 0.72)',
-                          pointerEvents: 'none',
+                          justifyContent: 'center',
+                          cursor: 'pointer',
                         }}
                       >
-                        <RightOutlined />
-                      </motion.span>
+                        <motion.span
+                          animate={{ rotate: flyout === n.id ? 90 : 0 }}
+                          transition={{ duration: reduced ? 0 : 0.15, ease: [0, 0, 0.2, 1] }}
+                          style={{ display: 'flex', alignItems: 'center' }}
+                        >
+                          <RightOutlined />
+                        </motion.span>
+                      </button>
                     )}
-                  </button>
+                  </div>
                 </Tooltip>
 
                 {/* Флайаут подменю группы */}
@@ -653,15 +689,16 @@ const AppLayout: React.FC = () => {
           }}
         >
           <Tooltip title={!sidebarExpanded ? (user?.short_name || user?.username) : undefined} placement="right" mouseEnterDelay={0.3}>
-            <div
+            <button
               aria-label="Текущий пользователь"
+              onClick={() => navigate('/profile')}
               style={{
                 width: sidebarExpanded ? '100%' : 40,
                 height: 40,
                 border: 'none',
                 borderRadius: 8,
                 background: 'transparent',
-                cursor: 'default',
+                cursor: 'pointer',
                 display: 'inline-flex',
                 alignItems: 'center',
                 justifyContent: sidebarExpanded ? 'flex-start' : 'center',
@@ -707,7 +744,7 @@ const AppLayout: React.FC = () => {
                   </span>
                 </motion.span>
               )}
-            </div>
+            </button>
           </Tooltip>
 
           <button

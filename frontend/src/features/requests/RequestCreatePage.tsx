@@ -141,15 +141,15 @@ const RequestCreatePage: React.FC = () => {
       try {
         const assetParams: Record<string, any> = { page_size: 1000, asset_type: baseAssetType, ordering: 'name' };
         if (baseAssetType === 'TMZ' && selectedRequestType.requires_long_term_use) assetParams.is_long_term_use = true;
-        const [catRes, assetRes] = await Promise.all([
+        const [catRes, assetRes] = await Promise.allSettled([
           api.get<PaginatedResponse<AssetCategory>>('/references/asset-categories/', {
-            params: { page_size: 500, asset_type: baseAssetType, ordering: 'name' },
+            params: { page_size: 100, asset_type: baseAssetType, ordering: 'name' },
           }),
           api.get<PaginatedResponse<Asset>>('/references/assets/', { params: assetParams }),
         ]);
         if (!active) return;
-        setCategories(catRes.data.results || []);
-        setAssets(assetRes.data.results || []);
+        setCategories(catRes.status === 'fulfilled' ? (catRes.value.data.results || []) : []);
+        setAssets(assetRes.status === 'fulfilled' ? (assetRes.value.data.results || []) : []);
         setSelectedCategoryId(null);
         setSelectedGroupId(null);
         setSearch('');
@@ -360,7 +360,7 @@ const RequestCreatePage: React.FC = () => {
       const res = isEdit
         ? await api.put(`/requests/${id}/`, payload)
         : await api.post('/requests/', payload);
-      navigate(isEdit ? `/requests/${res.data.id}` : '/requests');
+      navigate(isEdit ? `/requests/${res.data.id}` : '/requests/journal');
     } catch (err: any) {
       const msg = err?.response?.data
         ? (typeof err.response.data === 'string' ? err.response.data : Object.values(err.response.data).flat()[0])
@@ -387,7 +387,7 @@ const RequestCreatePage: React.FC = () => {
       <PageHeader
         title={isEdit ? 'Редактировать заявку' : 'Новая заявка'}
         subtitle="Выберите тип, категорию, группу и добавьте нужные позиции в заявку"
-        right={<Btn variant="secondary" onClick={() => navigate(isEdit ? `/requests/${id}` : '/requests')}><LeftOutlined /> {t('common.back')}</Btn>}
+        right={<Btn variant="secondary" onClick={() => navigate(isEdit ? `/requests/${id}` : '/requests/journal')}><LeftOutlined /> {t('common.back')}</Btn>}
       />
 
       {errorMsg && (
@@ -786,7 +786,7 @@ const RequestCreatePage: React.FC = () => {
               <Btn onClick={handleSubmit} loading={submitting} disabled={cartCount === 0} style={{ flex: '1 1 180px' }}>
                 {isEdit ? t('common.save') : t('requests.saveDraft')}
               </Btn>
-              <Btn variant="secondary" onClick={() => navigate(isEdit ? `/requests/${id}` : '/requests')}>
+              <Btn variant="secondary" onClick={() => navigate(isEdit ? `/requests/${id}` : '/requests/journal')}>
                 {t('common.cancel')}
               </Btn>
             </div>

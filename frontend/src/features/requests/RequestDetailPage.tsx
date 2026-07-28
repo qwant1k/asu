@@ -296,7 +296,7 @@ const RequestDetailPage: React.FC = () => {
         right={
           <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
             <Badge status={request.status} />
-            <Btn variant="secondary" onClick={() => navigate('/requests')}><LeftOutlined /> {t('common.back')}</Btn>
+            <Btn variant="secondary" onClick={() => navigate('/requests/journal')}><LeftOutlined /> {t('common.back')}</Btn>
           </div>
         }
       />

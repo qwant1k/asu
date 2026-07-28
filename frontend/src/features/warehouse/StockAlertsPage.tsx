@@ -407,18 +407,18 @@ const StockAlertsPage: React.FC = () => {
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const [rulesRes, usersRes, groupsRes, assetsRes, warehousesRes] = await Promise.all([
-        api.get<PaginatedResponse<StockAlertRule>>('/assets/stock-alert-rules/', { params: { page_size: 500, ordering: 'name' } }),
-        api.get<PaginatedResponse<User>>('/users/', { params: { page_size: 500, ordering: 'last_name' } }),
-        api.get<PaginatedResponse<AssetCategory>>('/references/asset-categories/', { params: { page_size: 1000, ordering: 'name' } }),
-        api.get<PaginatedResponse<Asset>>('/references/assets/', { params: { page_size: 1000, ordering: 'name' } }),
-        api.get<PaginatedResponse<Warehouse>>('/references/warehouses/', { params: { page_size: 500, ordering: 'name' } }),
+      const [rulesRes, usersRes, groupsRes, assetsRes, warehousesRes] = await Promise.allSettled([
+        api.get<PaginatedResponse<StockAlertRule>>('/assets/stock-alert-rules/', { params: { page_size: 100, ordering: 'name' } }),
+        api.get<PaginatedResponse<User>>('/users/', { params: { page_size: 100, ordering: 'last_name' } }),
+        api.get<PaginatedResponse<AssetCategory>>('/references/asset-categories/', { params: { page_size: 100, ordering: 'name' } }),
+        api.get<PaginatedResponse<Asset>>('/references/assets/', { params: { page_size: 100, ordering: 'name' } }),
+        api.get<PaginatedResponse<Warehouse>>('/references/warehouses/', { params: { page_size: 100, ordering: 'name' } }),
       ]);
-      setRules(rulesRes.data.results || []);
-      setUsers(usersRes.data.results || []);
-      setGroups(groupsRes.data.results || []);
-      setAssets(assetsRes.data.results || []);
-      setWarehouses(warehousesRes.data.results || []);
+      setRules(rulesRes.status === 'fulfilled' ? (rulesRes.value.data.results || []) : []);
+      setUsers(usersRes.status === 'fulfilled' ? (usersRes.value.data.results || []) : []);
+      setGroups(groupsRes.status === 'fulfilled' ? (groupsRes.value.data.results || []) : []);
+      setAssets(assetsRes.status === 'fulfilled' ? (assetsRes.value.data.results || []) : []);
+      setWarehouses(warehousesRes.status === 'fulfilled' ? (warehousesRes.value.data.results || []) : []);
     } catch {
       setRules([]);
     } finally {

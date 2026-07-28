@@ -191,17 +191,20 @@ const AdminAccessPage: React.FC = () => {
     setLoading(true);
     setErrorMsg('');
     try {
-      const [defsRes, rulesRes, overridesRes, usersRes] = await Promise.all([
+      const [defsRes, rulesRes, overridesRes, usersRes] = await Promise.allSettled([
         api.get<AccessDefinitionsResponse>('/users/access/definitions/'),
-        api.get<PaginatedResponse<PositionAccessRule>>('/users/access/position-rules/', { params: { page_size: 500, ordering: 'position' } }),
-        api.get<PaginatedResponse<UserAccessOverride>>('/users/access/user-overrides/', { params: { page_size: 500, ordering: 'user__last_name' } }),
-        api.get<PaginatedResponse<User>>('/users/', { params: { page_size: 500, ordering: 'last_name' } }),
+        api.get<PaginatedResponse<PositionAccessRule>>('/users/access/position-rules/', { params: { page_size: 100, ordering: 'position' } }),
+        api.get<PaginatedResponse<UserAccessOverride>>('/users/access/user-overrides/', { params: { page_size: 100, ordering: 'user__last_name' } }),
+        api.get<PaginatedResponse<User>>('/users/', { params: { page_size: 100, ordering: 'last_name' } }),
       ]);
-      setDefinitions(defsRes.data.permissions || []);
-      setRoleDefaults(defsRes.data.role_defaults || {});
-      setPositionRules(rulesRes.data.results || []);
-      setUserOverrides(overridesRes.data.results || []);
-      setUsers(usersRes.data.results || []);
+      setDefinitions(defsRes.status === 'fulfilled' ? (defsRes.value.data.permissions || []) : []);
+      setRoleDefaults(defsRes.status === 'fulfilled' ? (defsRes.value.data.role_defaults || {}) : {});
+      setPositionRules(rulesRes.status === 'fulfilled' ? (rulesRes.value.data.results || []) : []);
+      setUserOverrides(overridesRes.status === 'fulfilled' ? (overridesRes.value.data.results || []) : []);
+      setUsers(usersRes.status === 'fulfilled' ? (usersRes.value.data.results || []) : []);
+      if (defsRes.status === 'rejected') {
+        setErrorMsg('Не удалось загрузить определения прав доступа');
+      }
     } catch (err: any) {
       setErrorMsg(err?.response?.data?.detail || 'Не удалось загрузить настройки прав');
     } finally {
